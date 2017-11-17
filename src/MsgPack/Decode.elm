@@ -1,4 +1,4 @@
-module MsgPack.Decoding
+module MsgPack.Decode
     exposing
         ( toBytes
         )

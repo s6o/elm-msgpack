@@ -4,7 +4,7 @@ import Html exposing (Html, div, text)
 import Http
 import HttpBuilder exposing (..)
 import Meld exposing (Meld)
-import MsgPack.Decoding as Msgpd
+import MsgPack.Decode as Msgpd
 import Task exposing (Task)
 
 
