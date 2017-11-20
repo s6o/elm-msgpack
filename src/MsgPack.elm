@@ -33,6 +33,7 @@ import Array
 import Bitwise
 import Char
 import Result exposing (Result)
+import String.UTF8 as Utf8
 
 
 {-| Convert to bytes from an iso-8859-1 string representation.
@@ -71,6 +72,7 @@ type MsgPack
 type Error
     = AppendFailure String
     | EmptyStream
+    | ExtTypeMissing
     | IncorrectStart String
     | IncorrectBlockSize String
     | NotImplemented
@@ -198,27 +200,63 @@ parseByte b bytes accum =
 
         0xC4 ->
             -- bin8
-            parseBin b B1 bytes
+            let
+                ( msgpack, nextBytes ) =
+                    parseBin b B1 bytes
+            in
+            ( append accum msgpack
+            , nextBytes
+            )
 
         0xC5 ->
             -- bin16
-            parseBin b B2 bytes
+            let
+                ( msgpack, nextBytes ) =
+                    parseBin b B2 bytes
+            in
+            ( append accum msgpack
+            , nextBytes
+            )
 
         0xC6 ->
             -- bin32
-            parseBin b B4 bytes
+            let
+                ( msgpack, nextBytes ) =
+                    parseBin b B4 bytes
+            in
+            ( append accum msgpack
+            , nextBytes
+            )
 
         0xC7 ->
             -- ext8
-            ( Err NotImplemented, bytes )
+            let
+                ( msgpack, nextBytes ) =
+                    parseExt b B1 bytes
+            in
+            ( append accum msgpack
+            , nextBytes
+            )
 
         0xC8 ->
             -- ext16
-            ( Err NotImplemented, bytes )
+            let
+                ( msgpack, nextBytes ) =
+                    parseExt b B2 bytes
+            in
+            ( append accum msgpack
+            , nextBytes
+            )
 
         0xC9 ->
             -- ext32
-            ( Err NotImplemented, bytes )
+            let
+                ( msgpack, nextBytes ) =
+                    parseExt b B4 bytes
+            in
+            ( append accum msgpack
+            , nextBytes
+            )
 
         0xCA ->
             -- float32
@@ -322,35 +360,83 @@ parseByte b bytes accum =
 
         0xD4 ->
             -- fixext1
-            ( Err NotImplemented, bytes )
+            let
+                ( msgpack, nextBytes ) =
+                    parseFixExt b B1 bytes
+            in
+            ( append accum msgpack
+            , nextBytes
+            )
 
         0xD5 ->
             -- fixext2
-            ( Err NotImplemented, bytes )
+            let
+                ( msgpack, nextBytes ) =
+                    parseFixExt b B2 bytes
+            in
+            ( append accum msgpack
+            , nextBytes
+            )
 
         0xD6 ->
             -- fixext4
-            ( Err NotImplemented, bytes )
+            let
+                ( msgpack, nextBytes ) =
+                    parseFixExt b B4 bytes
+            in
+            ( append accum msgpack
+            , nextBytes
+            )
 
         0xD7 ->
             -- fixext8
-            ( Err NotImplemented, bytes )
+            let
+                ( msgpack, nextBytes ) =
+                    parseFixExt b B8 bytes
+            in
+            ( append accum msgpack
+            , nextBytes
+            )
 
         0xD8 ->
             -- fixext16
-            ( Err NotImplemented, bytes )
+            let
+                ( msgpack, nextBytes ) =
+                    parseFixExt b B16 bytes
+            in
+            ( append accum msgpack
+            , nextBytes
+            )
 
         0xD9 ->
             -- str8
-            ( Err NotImplemented, bytes )
+            let
+                ( msgpack, nextBytes ) =
+                    parseStr b B1 bytes
+            in
+            ( append accum msgpack
+            , nextBytes
+            )
 
         0xDA ->
             -- str16
-            ( Err NotImplemented, bytes )
+            let
+                ( msgpack, nextBytes ) =
+                    parseStr b B2 bytes
+            in
+            ( append accum msgpack
+            , nextBytes
+            )
 
         0xDB ->
             -- str32
-            ( Err NotImplemented, bytes )
+            let
+                ( msgpack, nextBytes ) =
+                    parseStr b B4 bytes
+            in
+            ( append accum msgpack
+            , nextBytes
+            )
 
         0xDC ->
             -- array16
@@ -398,7 +484,13 @@ parseByte b bytes accum =
                 )
             else if b >= 0xA0 && b <= 0xBF then
                 -- fixstr
-                ( Err NotImplemented, bytes )
+                let
+                    ( msgpack, nextBytes ) =
+                        parseStr b B0 bytes
+                in
+                ( append accum msgpack
+                , nextBytes
+                )
             else if b >= 0xE0 && b <= 0xFF then
                 -- neg fixint
                 let
@@ -484,21 +576,106 @@ parseBin byte block stream =
         validBlocks =
             [ B1, B2, B4 ]
 
-        byteCount =
+        blockBytes =
+            blockBytesCount block
+
+        dataLength =
             dataCount byte Nibble block stream
     in
     if List.member block validBlocks then
         ( Bin
             byte
             { block = block
-            , bsize = byteCount
-            , bytes = List.take byteCount stream
+            , bsize = dataLength
+            , bytes = List.drop blockBytes stream |> List.take dataLength
             }
             |> Ok
-        , List.drop byteCount stream
+        , List.drop (blockBytes + dataLength) stream
         )
     else
         ( ("Unsuppored bin type (size): " ++ Basics.toString block)
+            |> IncorrectBlockSize
+            |> Err
+        , stream
+        )
+
+
+{-| Parse a MessagePack ext from byte stream.
+-}
+parseExt : Int -> BlockBytes -> List Int -> ( Result Error MsgPack, List Int )
+parseExt byte block stream =
+    let
+        validBlocks =
+            [ B1, B2, B4 ]
+
+        blockBytes =
+            blockBytesCount block
+
+        dataLength =
+            dataCount byte None block stream
+
+        typeByte =
+            List.drop blockBytes stream
+                |> List.take 1
+                |> List.head
+                |> Result.fromMaybe ExtTypeMissing
+    in
+    if List.member block validBlocks then
+        ( typeByte
+            |> Result.map
+                (\t ->
+                    Ext
+                        byte
+                        { block = block
+                        , fixed = False
+                        , type_ = t
+                        , data = List.drop (blockBytes + 1) stream |> List.take dataLength
+                        , dsize = dataLength
+                        }
+                )
+        , List.drop (blockBytes + dataLength) stream
+        )
+    else
+        ( ("Unsupported ext type (size): " ++ Basics.toString block)
+            |> IncorrectBlockSize
+            |> Err
+        , stream
+        )
+
+
+{-| Parse a MessagePack fixext from byte stream.
+-}
+parseFixExt : Int -> BlockBytes -> List Int -> ( Result Error MsgPack, List Int )
+parseFixExt byte block stream =
+    let
+        validBlocks =
+            [ B1, B2, B4, B8, B16 ]
+
+        blockBytes =
+            blockBytesCount block
+
+        typeByte =
+            List.take 1 stream
+                |> List.head
+                |> Result.fromMaybe ExtTypeMissing
+    in
+    if List.member block validBlocks then
+        ( typeByte
+            |> Result.map
+                (\t ->
+                    Ext
+                        byte
+                        { block = block
+                        , fixed = True
+                        , type_ = t
+                        , data = List.drop 1 stream |> List.take blockBytes
+                        , dsize = blockBytes
+                        }
+                )
+        , List.drop (1 + blockBytes) stream
+        )
+    else
+        ( ("Unsupported ext type (size): " ++ Basics.toString block)
             |> IncorrectBlockSize
             |> Err
         , stream
@@ -665,6 +842,44 @@ parseIntUnsigned byte block stream =
         )
     else
         ( ("Unsupported unsigned int type (size): " ++ Basics.toString block)
+            |> IncorrectBlockSize
+            |> Err
+        , stream
+        )
+
+
+{-| Parse a MessagePack str from byte stream.
+-}
+parseStr : Int -> BlockBytes -> List Int -> ( Result Error MsgPack, List Int )
+parseStr byte block stream =
+    let
+        validBlocks =
+            [ B0, B1, B2, B4 ]
+
+        blockBytes =
+            blockBytesCount block
+
+        dataLength =
+            dataCount byte Triple block stream
+    in
+    if List.member block validBlocks then
+        ( List.drop blockBytes stream
+            |> List.take dataLength
+            |> Utf8.toString
+            |> Result.map
+                (\s ->
+                    Str
+                        byte
+                        { block = block
+                        , signed = False
+                        , value = s
+                        }
+                )
+            |> Result.mapError IncorrectBlockSize
+        , List.drop (blockBytes + dataLength) stream
+        )
+    else
+        ( ("Unsupported str type (size): " ++ Basics.toString block)
             |> IncorrectBlockSize
             |> Err
         , stream
