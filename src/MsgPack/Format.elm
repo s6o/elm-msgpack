@@ -1,17 +1,25 @@
 module MsgPack.Format
     exposing
-        ( Data(..)
-        , Flag(..)
-        , FlagMasked(..)
+        ( Data
         , Format(..)
+        , Parsed
+        , byteValue
         , format
+        , parse
         )
 
 {-| MessagePack specification.
+
+@docs Data, Format, Parsed, byteValue, format, parse
+
 -}
 
+import Bitwise
+import MsgPack.Error as Error exposing (Error)
+import Result exposing (Result)
 
-{-| How is data length to be determined after/with `Flag` or `FlagMasked`.
+
+{-| How is data length to be determined for a given `Format`.
 -}
 type Data
     = Blocks Int Flag
@@ -56,6 +64,123 @@ type Format
     | Str Data
     | True_ Data
     | Unsigned Data
+
+
+{-| Parsed bytes, header removed for given `Format`.
+-}
+type alias Parsed =
+    { format : Format
+    , bytes : List Int
+    , dataSize : Int
+    }
+
+
+{-| @private
+Number of bytes used for block specifing data length.
+-}
+blockCount : Data -> Int
+blockCount data =
+    case data of
+        Blocks c _ ->
+            c
+
+        BlocksType c _ _ ->
+            c
+
+        _ ->
+            0
+
+
+{-| Given a number of bytes in big-endian, construct an integer value.
+-}
+byteValue : List Int -> Int
+byteValue bytes =
+    bytes
+        |> List.foldr
+            (\b ( a, bi ) -> ( a + Bitwise.shiftLeftBy (bi * 8) b, bi + 1 ))
+            ( 0, 0 )
+        |> (\( a, _ ) -> a)
+
+
+{-| @private
+Get data layout from `Format`.
+-}
+data : Format -> Data
+data fmt =
+    case fmt of
+        Nil d ->
+            d
+
+        Array_ d ->
+            d
+
+        Bin d ->
+            d
+
+        Ext d ->
+            d
+
+        False_ d ->
+            d
+
+        FixArray d ->
+            d
+
+        FixExt d ->
+            d
+
+        FixMap d ->
+            d
+
+        FixStr d ->
+            d
+
+        Float_ d ->
+            d
+
+        Map d ->
+            d
+
+        Integer d ->
+            d
+
+        Str d ->
+            d
+
+        True_ d ->
+            d
+
+        Unsigned d ->
+            d
+
+
+{-| @private
+Number of data bytes accordingly `Format`'s data layout.
+-}
+dataLength : Data -> List Int -> Int
+dataLength data bytes =
+    case data of
+        Blocks c _ ->
+            List.drop 1 bytes
+                |> List.take c
+                |> byteValue
+
+        BlocksType c _ _ ->
+            List.drop 1 bytes
+                |> List.take c
+                |> byteValue
+
+        Bytes c _ ->
+            c
+
+        Empty _ ->
+            0
+
+        Fixed (FlagMasked byte mask) ->
+            Bitwise.and byte mask
+
+        TypeBytes t c _ ->
+            t + c
 
 
 {-| Detect MessagePack `Format` from specified byte value.
@@ -192,15 +317,34 @@ format byte =
                 Just <| Unsigned <| Fixed <| FlagMasked byte 0x7F
             else if byte >= 0x80 && byte <= 0x8F then
                 -- fixmap
-                Just <| Map <| Fixed <| FlagMasked byte 0x8F
+                Just <| Map <| Fixed <| FlagMasked byte 0x0F
             else if byte >= 0x90 && byte <= 0x9F then
                 -- fixarray
-                Just <| Array_ <| Fixed <| FlagMasked byte 0x9F
+                Just <| Array_ <| Fixed <| FlagMasked byte 0x0F
             else if byte >= 0xA0 && byte <= 0xBF then
                 -- fixstr
-                Just <| Str <| Fixed <| FlagMasked byte 0xBF
+                Just <| Str <| Fixed <| FlagMasked byte 0x1F
             else if byte >= 0xE0 && byte <= 0xFF then
                 -- neg fixint
-                Just <| Integer <| Fixed <| FlagMasked byte 0xFF
+                Just <| Integer <| Fixed <| FlagMasked byte 0x1F
             else
                 Nothing
+
+
+{-| Parse chunk of data bytes accordingly to `Format`.
+-}
+parse : Maybe Format -> List Int -> Result Error Parsed
+parse fmt bytes =
+    fmt
+        |> Maybe.map
+            (\f ->
+                let
+                    d =
+                        data f
+                in
+                { format = f
+                , bytes = List.drop (1 + blockCount d) bytes
+                , dataSize = dataLength d bytes
+                }
+            )
+        |> Result.fromMaybe Error.UnknownFormat
