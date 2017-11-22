@@ -1,16 +1,17 @@
 module MsgPack.Format
     exposing
-        ( Data
+        ( DataLayout
         , Format(..)
         , Parsed
         , byteValue
+        , dataLength
         , format
         , parse
         )
 
 {-| MessagePack specification.
 
-@docs Data, Format, Parsed, byteValue, format, parse
+@docs Format, DataLayout, dataLength, format, Parsed, parse, byteValue
 
 -}
 
@@ -21,7 +22,7 @@ import Result exposing (Result)
 
 {-| How is data length to be determined for a given `Format`.
 -}
-type Data
+type DataLayout
     = Blocks Int Flag
     | BlocksType Int Int Flag
     | Bytes Int Flag
@@ -49,24 +50,24 @@ the negative fixnum and int types are captured by `Integer`.
 
 -}
 type Format
-    = Nil Data
-    | Array_ Data
-    | Bin Data
-    | Ext Data
-    | False_ Data
-    | FixArray Data
-    | FixExt Data
-    | FixMap Data
-    | FixStr Data
-    | Float_ Data
-    | Map Data
-    | Integer Data
-    | Str Data
-    | True_ Data
-    | Unsigned Data
+    = Nil DataLayout
+    | Array_ DataLayout
+    | Bin DataLayout
+    | Ext DataLayout
+    | False_ DataLayout
+    | FixArray DataLayout
+    | FixExt DataLayout
+    | FixMap DataLayout
+    | FixStr DataLayout
+    | Float_ DataLayout
+    | Map DataLayout
+    | Integer DataLayout
+    | Str DataLayout
+    | True_ DataLayout
+    | Unsigned DataLayout
 
 
-{-| Parsed bytes, header removed for given `Format`.
+{-| Parsed data bytes, format header has been removed from `bytes` for given `Format`.
 -}
 type alias Parsed =
     { format : Format
@@ -78,7 +79,7 @@ type alias Parsed =
 {-| @private
 Number of bytes used for block specifing data length.
 -}
-blockCount : Data -> Int
+blockCount : DataLayout -> Int
 blockCount data =
     case data of
         Blocks c _ ->
@@ -105,7 +106,7 @@ byteValue bytes =
 {-| @private
 Get data layout from `Format`.
 -}
-data : Format -> Data
+data : Format -> DataLayout
 data fmt =
     case fmt of
         Nil d ->
@@ -154,10 +155,9 @@ data fmt =
             d
 
 
-{-| @private
-Number of data bytes accordingly `Format`'s data layout.
+{-| Number of data bytes accordingly `Format`'s data layout.
 -}
-dataLength : Data -> List Int -> Int
+dataLength : DataLayout -> List Int -> Int
 dataLength data bytes =
     case data of
         Blocks c _ ->
