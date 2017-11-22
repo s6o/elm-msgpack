@@ -94,6 +94,10 @@ fromMsgPack msgpack =
 
 
 {-| Deserialize a list of bytes into `MsgPack`.
+
+As with JSON, the MessagePack byte stream has to start with a container: Map or
+Vector (array).
+
 -}
 toMsgPack : List Int -> Result Error MsgPack
 toMsgPack bytes =
@@ -112,7 +116,13 @@ toMsgPack bytes =
                             Err error
 
                         Ok ( mp, next ) ->
-                            parse next <| Just mp
+                            let
+                                nextAccum =
+                                    Maybe.map (append mp) accum
+                                        |> Maybe.withDefault (Ok mp)
+                                        |> Result.toMaybe
+                            in
+                            parse next nextAccum
     in
     parse bytes Nothing
 
@@ -182,126 +192,100 @@ parseFormat ( msgpack, bytes ) fmt =
             )
 
 
-{-| Append a `MsgPack` item to `MsgPack` collection (array or map).
-
-All collection items must have the same type. First item added to the collection
-sets the type of the collection.
-
+{-| @private
+Append a `MsgPack` item to `MsgPack` collection (array or map).
 -}
+append : MsgPack -> MsgPack -> Result Error MsgPack
+append item collection =
+    case collection of
+        Map r ->
+            Map
+                { r
+                    | data =
+                        Maybe.map
+                            (\d ->
+                                case Dict.get appendKey d of
+                                    Nothing ->
+                                        Dict.insert appendKey item d
+
+                                    Just kv ->
+                                        Dict.insert (asKey kv) item d
+                                            |> Dict.remove appendKey
+                            )
+                            r.data
+                }
+                |> Ok
+
+        Vector r ->
+            Vector { r | data = r.data |> Maybe.map (\l -> l ++ [ item ]) }
+                |> Ok
+
+        _ ->
+            "2nd argument needs to be a MsgPack collection type: Map or Vector."
+                |> Error.AppendFailure
+                |> Err
 
 
-
-{- }
-   append : Maybe MsgPack -> Result Error MsgPack -> Result Error MsgPack
-   append collection item =
-       let
-           updateArray b r i =
-               Array_
-                   b
-                   { r
-                       | count = r.count + 1
-                       , objects =
-                           if r.total > r.count + 1 then
-                               i :: r.objects
-                           else
-                               i :: r.objects |> List.reverse
-                   }
-
-           updateMapKey b r k =
-               Map b { r | count = r.count + 1, objects = ( k, k ) :: r.objects }
-
-           updateMapValue b r v =
-               Map
-                   b
-                   { r
-                       | count = r.count + 1
-                       , objects =
-                           if r.total > r.count + 1 then
-                               case r.objects of
-                                   [] ->
-                                       r.objects
-
-                                   ( k, _ ) :: rest ->
-                                       ( k, v ) :: rest
-                           else
-                               case r.objects of
-                                   [] ->
-                                       r.objects
-
-                                   ( k, _ ) :: rest ->
-                                       ( k, v ) :: rest |> List.reverse
-                   }
-       in
-       case collection of
-           Just (Array_ b r) ->
-               if r.count < r.total then
-                   case
-                       ( List.head r.objects
-                       , item
-                       )
-                   of
-                       ( Nothing, Ok i ) ->
-                           updateArray b r i |> Ok
-
-                       ( Just headItem, Ok i ) ->
-                           if sameType headItem i then
-                               updateArray b r i |> Ok
-                           else
-                               "Array item type mismatch."
-                                   |> AppendFailure
-                                   |> Err
-
-                       ( Nothing, Err error ) ->
-                           Err error
-
-                       ( Just _, Err error ) ->
-                           Err error
-               else
-                   "Array full, expected size of items exceeded."
-                       |> AppendFailure
-                       |> Err
-
-           Just (Map b r) ->
-               if r.count < r.total then
-                   case
-                       ( List.head r.objects
-                       , item
-                       )
-                   of
-                       ( Nothing, Ok i ) ->
-                           updateMapKey b r i |> Ok
-
-                       ( Just ( k, v ), Ok i ) ->
-                           if (r.count + 1) % 2 == 1 then
-                               -- odd, map key
-                               if sameType k i then
-                                   updateMapKey b r i |> Ok
-                               else
-                                   "Map key type mismatch."
-                                       |> AppendFailure
-                                       |> Err
-                           else if sameType v i then
-                               updateMapValue b r i |> Ok
-                           else
-                               "Map value type mismatch."
-                                   |> AppendFailure
-                                   |> Err
-
-                       ( Nothing, Err error ) ->
-                           Err error
-
-                       ( Just _, Err error ) ->
-                           Err error
-               else
-                   "Map full, expected size of items exceeded."
-                       |> AppendFailure
-                       |> Err
-
-           _ ->
-               "First argument must be a `MsgPack` collection: array or map."
-                   |> AppendFailure
-                   |> Err
+{-| @private
+Temporary `MsgPack`'s Map key used to collect actual key value, before processing key's item.
 -}
+appendKey : String
+appendKey =
+    "__elm-msgpack-key__"
+
+
+{-| @private
+Convert `MsgPack`'s `MsgPackValue` type's `data` member value to `String`.
+-}
+asKey : MsgPack -> String
+asKey msgpack =
+    case msgpack of
+        Nil _ ->
+            "__elm-msgpack-nil__"
+
+        Blob { data } ->
+            data
+                |> Maybe.map (\bytes -> Utf8.toString bytes |> Result.withDefault "__elm-msgpack-bin__")
+                |> Maybe.withDefault "__elm-msgpack-bin__"
+
+        Boolean { data } ->
+            data
+                |> Maybe.map (\b -> "__elm-msgpack-bool-" ++ Basics.toString b ++ "__")
+                |> Maybe.withDefault "__elm-msgpack-bool__"
+
+        Extension { data } ->
+            data
+                |> Maybe.map
+                    (\( _, b ) ->
+                        Utf8.toString b
+                            |> Result.withDefault "__elm-msgpack-ext__"
+                    )
+                |> Maybe.withDefault "__elm-msgpack-ext__"
+
+        Double { data } ->
+            data
+                |> Maybe.map Basics.toString
+                |> Maybe.withDefault "__elm-msgpack-double__"
+
+        Integer { data } ->
+            data
+                |> Maybe.map Basics.toString
+                |> Maybe.withDefault "__elm-msgpack-integer__"
+
+        Map { data } ->
+            data
+                |> Maybe.map Basics.toString
+                |> Maybe.withDefault "__elm-msgpack-map__"
+
+        Text { data } ->
+            data
+                |> Maybe.map identity
+                |> Maybe.withDefault "__elm-msgpack-text__"
+
+        Vector { data } ->
+            data
+                |> Maybe.map Basics.toString
+                |> Maybe.withDefault "__elm-msgpack-vector__"
 
 
 parseArray : Parsed -> ( MsgPack, List Int )
@@ -453,39 +437,3 @@ parseText r =
         }
     , List.drop r.dataSize r.bytes
     )
-
-
-{-| @private
--}
-sameType : MsgPack -> MsgPack -> Bool
-sameType a b =
-    case ( a, b ) of
-        ( Nil _, Nil _ ) ->
-            True
-
-        ( Blob _, Blob _ ) ->
-            True
-
-        ( Boolean _, Boolean _ ) ->
-            True
-
-        ( Extension _, Extension _ ) ->
-            True
-
-        ( Double _, Double _ ) ->
-            True
-
-        ( Integer _, Integer _ ) ->
-            True
-
-        ( Map _, Map _ ) ->
-            True
-
-        ( Text _, Text _ ) ->
-            True
-
-        ( Vector _, Vector _ ) ->
-            True
-
-        _ ->
-            False
