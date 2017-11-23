@@ -40,7 +40,7 @@ import Result exposing (Result)
 import String.UTF8 as Utf8
 
 
-{-| Convert to bytes from an iso-8859-1 string representation.
+{-| Convert to bytes from a string representation delivered as 'text/plain; charset=x-user-defined'.
 -}
 asBytes : String -> List Int
 asBytes bstr =
@@ -49,7 +49,7 @@ asBytes bstr =
 
 
 {-| Convert from bytes to string representation to be sent with the HTTP
-Content-Type header as 'text/plain; charset=iso-8859-1'.
+Content-Type header as 'text/plain; charset=x-user-defined'.
 -}
 toString : List Int -> String
 toString bstr =
