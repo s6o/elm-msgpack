@@ -188,7 +188,7 @@ parseFormat ( msgpack, bytes ) fmt =
                         parseBoolean r True
 
                     Fmt.Unsigned _ ->
-                        parseInteger r
+                        parseUnsigned r
             )
 
 
@@ -413,7 +413,28 @@ parseFloat64 r =
 
 parseInteger : Parsed -> ( MsgPack, List Int )
 parseInteger r =
-    ( Integer { format = r.format, data = Just <| Fmt.byteValue <| List.take r.dataSize r.bytes }
+    let
+        bytes =
+            List.take r.dataSize r.bytes
+
+        mask =
+            List.foldr (\b ( a, bi ) -> ( a + Bitwise.shiftLeftBy (bi * 8) 0xFF, bi + 1 )) ( 0, 0 ) bytes
+                |> (\( a, _ ) -> Bitwise.xor a 0x000FFFFFFFFFFFFF)
+
+        value =
+            bytes
+                |> List.foldr
+                    (\b ( a, bi ) ->
+                        ( a + (Bitwise.and b 0xFF |> Bitwise.shiftLeftBy (bi * 8)), bi + 1 )
+                    )
+                    ( 0, 0 )
+                |> (\( a, _ ) -> Bitwise.or a mask)
+    in
+    ( Integer
+        { format = r.format
+        , data =
+            Just <| value
+        }
     , List.drop r.dataSize r.bytes
     )
 
@@ -435,5 +456,12 @@ parseText r =
                 |> Result.withDefault ""
                 |> Just
         }
+    , List.drop r.dataSize r.bytes
+    )
+
+
+parseUnsigned : Parsed -> ( MsgPack, List Int )
+parseUnsigned r =
+    ( Integer { format = r.format, data = Just <| Fmt.byteValue <| List.take r.dataSize r.bytes }
     , List.drop r.dataSize r.bytes
     )
