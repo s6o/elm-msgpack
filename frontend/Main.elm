@@ -1,10 +1,11 @@
 module Main exposing (..)
 
+import Hex
 import Html exposing (Html, div, text)
 import Http
 import HttpBuilder exposing (..)
 import Meld exposing (Meld)
-import MsgPack.Decode as Msgpd
+import MsgPack as MP
 import Task exposing (Task)
 
 
@@ -86,13 +87,22 @@ msgpackBaseTypes : Meld Model Http.Error Msg -> Task Http.Error (Meld Model Http
 msgpackBaseTypes meld =
     requestMsgpackBaseTypes (Meld.model meld)
         |> Task.map
-            (\binary ->
+            (\binstr ->
                 let
-                    ints =
-                        Msgpd.toBytes binary
+                    bytes =
+                        MP.asBytes binstr
 
-                    _ =
-                        Debug.log "Deocded ints" ints
+                    msgpack =
+                        MP.toMsgPack bytes
+
+                    l1 =
+                        Debug.log "Deocded ints"
+                            (bytes
+                                |> List.map Hex.toString
+                            )
+
+                    l2 =
+                        Debug.log "MsgPack Result" msgpack
                 in
                 meld
             )
