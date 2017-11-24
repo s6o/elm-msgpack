@@ -381,8 +381,8 @@ dataLength data bytes =
         Empty _ ->
             0
 
-        Fixed _ ->
-            1
+        Fixed (FlagMasked byte mask) ->
+            Bitwise.and byte mask
 
         TypeBytes t c _ ->
             t + c
