@@ -44,10 +44,6 @@ type FlagMasked
 
 
 {-| MessagePack formats.
-
-MessagePack's positive fixnum and uint types are captured by `Unsigned` and
-the negative fixnum and int types are captured by `Integer`.
-
 -}
 type Format
     = Nil DataLayout
@@ -58,6 +54,8 @@ type Format
     | FixArray DataLayout
     | FixExt DataLayout
     | FixMap DataLayout
+    | FixNegInt DataLayout
+    | FixPosInt DataLayout
     | FixStr DataLayout
     | Float_ DataLayout
     | Map DataLayout
@@ -133,6 +131,12 @@ data fmt =
         FixMap d ->
             d
 
+        FixNegInt d ->
+            d
+
+        FixPosInt d ->
+            d
+
         FixStr d ->
             d
 
@@ -176,8 +180,8 @@ dataLength data bytes =
         Empty _ ->
             0
 
-        Fixed (FlagMasked byte mask) ->
-            Bitwise.and byte mask
+        Fixed _ ->
+            1
 
         TypeBytes t c _ ->
             t + c
@@ -314,7 +318,7 @@ format byte =
         _ ->
             if byte >= 0x00 && byte <= 0x7F then
                 -- pos fixint
-                Just <| Unsigned <| Fixed <| FlagMasked byte 0x7F
+                Just <| FixPosInt <| Fixed <| FlagMasked byte 0x7F
             else if byte >= 0x80 && byte <= 0x8F then
                 -- fixmap
                 Just <| Map <| Fixed <| FlagMasked byte 0x0F
@@ -326,7 +330,7 @@ format byte =
                 Just <| Str <| Fixed <| FlagMasked byte 0x1F
             else if byte >= 0xE0 && byte <= 0xFF then
                 -- neg fixint
-                Just <| Integer <| Fixed <| FlagMasked byte 0x1F
+                Just <| FixNegInt <| Fixed <| FlagMasked byte 0x1F
             else
                 Nothing
 
@@ -342,9 +346,23 @@ parse fmt bytes =
                     d =
                         data f
                 in
-                { format = f
-                , bytes = List.drop (1 + blockCount d) bytes
-                , dataSize = dataLength d bytes
-                }
+                case f of
+                    FixNegInt (Fixed (FlagMasked byte mask)) ->
+                        { format = f
+                        , bytes = List.drop 1 bytes
+                        , dataSize = byte
+                        }
+
+                    FixPosInt (Fixed (FlagMasked byte mask)) ->
+                        { format = f
+                        , bytes = List.drop 1 bytes
+                        , dataSize = Bitwise.and byte mask
+                        }
+
+                    _ ->
+                        { format = f
+                        , bytes = List.drop (1 + blockCount d) bytes
+                        , dataSize = dataLength d bytes
+                        }
             )
         |> Result.fromMaybe Error.UnknownFormat

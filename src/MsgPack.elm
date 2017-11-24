@@ -166,6 +166,25 @@ parseFormat ( msgpack, bytes ) fmt =
                     Fmt.FixMap _ ->
                         parseMap r
 
+                    Fmt.FixNegInt _ ->
+                        ( Integer
+                            { format = r.format
+                            , data =
+                                Bitwise.and r.dataSize 0xFF
+                                    |> Bitwise.or 0x000FFFFFFFFFFF00
+                                    |> Just
+                            }
+                        , r.bytes
+                        )
+
+                    Fmt.FixPosInt _ ->
+                        ( Integer
+                            { format = r.format
+                            , data = Just r.dataSize
+                            }
+                        , r.bytes
+                        )
+
                     Fmt.FixStr _ ->
                         parseText r
 
