@@ -93,7 +93,7 @@ msgpackBaseTypes meld =
                         MP.asBytes binstr
 
                     msgpack =
-                        MP.toMsgPack bytes
+                        MP.unpack bytes
 
                     l1 =
                         Debug.log "Deocded ints"
