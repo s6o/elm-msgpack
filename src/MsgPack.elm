@@ -7,7 +7,14 @@ module MsgPack
         , asBytes
         , asString
         , fromMsgPack
+        , toBool
+        , toBytes
+        , toDict
+        , toFloat
+        , toInt
+        , toList
         , toMsgPack
+        , toString
         )
 
 {-| MessagePack for Elm.
@@ -21,6 +28,11 @@ module MsgPack
 # Serialization / Deserialization
 
 @docs fromMsgPack, toMsgPack
+
+
+# Conversions
+
+@docs toBool, toBytes, toDict, toFloat, toInt, toList, toString
 
 
 # HTTP
@@ -443,7 +455,9 @@ type alias MsgPackValue d =
 type Error
     = AppendFailure String
     | EmptyStream
+    | ConversionFailure String
     | UnknownFormat
+    | ValueNotSet
 
 
 {-| Serialize to list of bytes.
@@ -485,6 +499,142 @@ toMsgPack bytes =
                             parse next nextAccum
     in
     parse bytes Nothing
+
+
+{-| Convert from `MsgPack`'s Boolean to Elm's Bool.
+-}
+toBool : MsgPack -> Result Error Bool
+toBool msgpack =
+    case msgpack of
+        Boolean { value } ->
+            Maybe.map Ok value
+                |> Maybe.withDefault (Err ValueNotSet)
+
+        _ ->
+            ("Expected MsgPack's Boolean, received -" ++ Basics.toString msgpack)
+                |> ConversionFailure
+                |> Err
+
+
+{-| Convert from `MsgPack`'s Blob or Extension to a list of bytes.
+In case of Extension the first byte in the list represents the 'type' byte.
+-}
+toBytes : MsgPack -> Result Error (List Int)
+toBytes msgpack =
+    case msgpack of
+        Blob { value } ->
+            Maybe.map Ok value
+                |> Maybe.withDefault (Err ValueNotSet)
+
+        Extension { value } ->
+            Maybe.map (\( t, bytes ) -> Ok <| t :: bytes) value
+                |> Maybe.withDefault (Err ValueNotSet)
+
+        _ ->
+            ("Expected MsgPack's Blob or Extension, received -" ++ Basics.toString msgpack)
+                |> ConversionFailure
+                |> Err
+
+
+{-| Convert from `Msgpack`'s Map to Elm's Dict.
+-}
+toDict : MsgPack -> Result Error (Dict String MsgPack)
+toDict msgpack =
+    case msgpack of
+        Map { value } ->
+            Maybe.map Ok value
+                |> Maybe.withDefault (Err ValueNotSet)
+
+        _ ->
+            ("Expected MsgPack's Map, received -" ++ Basics.toString msgpack)
+                |> ConversionFailure
+                |> Err
+
+
+{-| Convert from `MsgPack`'s Double or Text to Elm's `Float`.
+-}
+toFloat : MsgPack -> Result Error Float
+toFloat msgpack =
+    case msgpack of
+        Double { value } ->
+            Maybe.map Ok value
+                |> Maybe.withDefault (Err ValueNotSet)
+
+        Text { value } ->
+            value
+                |> Maybe.map
+                    (\v ->
+                        String.toFloat v
+                            |> Result.mapError
+                                (\x ->
+                                    ("Conversion failure from MsgPack's Text to Float -" ++ x)
+                                        |> ConversionFailure
+                                )
+                    )
+                |> Maybe.withDefault (Err ValueNotSet)
+
+        _ ->
+            ("Expected MsgPack's Double, received -" ++ Basics.toString msgpack)
+                |> ConversionFailure
+                |> Err
+
+
+{-| Convert from `MsgPack`'s Integer or Text to Elm's `Float`.
+-}
+toInt : MsgPack -> Result Error Int
+toInt msgpack =
+    case msgpack of
+        Integer { value } ->
+            Maybe.map Ok value
+                |> Maybe.withDefault (Err ValueNotSet)
+
+        Text { value } ->
+            value
+                |> Maybe.map
+                    (\v ->
+                        String.toInt v
+                            |> Result.mapError
+                                (\x ->
+                                    ("Conversion failure from Text to Int -" ++ x)
+                                        |> ConversionFailure
+                                )
+                    )
+                |> Maybe.withDefault (Err ValueNotSet)
+
+        _ ->
+            ("Expected MsgPack's Integer, received -" ++ Basics.toString msgpack)
+                |> ConversionFailure
+                |> Err
+
+
+{-| Convert from `MsgPack`'s Vector to Elm's List.
+-}
+toList : MsgPack -> Result Error (List MsgPack)
+toList msgpack =
+    case msgpack of
+        Vector { value } ->
+            Maybe.map Ok value
+                |> Maybe.withDefault (Err ValueNotSet)
+
+        _ ->
+            ("Expected MsgPack's Vector, received -" ++ Basics.toString msgpack)
+                |> ConversionFailure
+                |> Err
+
+
+{-| Convert from `MsgPack`'s Text to Elm's String.
+-}
+toString : MsgPack -> Result Error String
+toString msgpack =
+    case msgpack of
+        Text { value } ->
+            Maybe.map Ok value
+                |> Maybe.withDefault (Err ValueNotSet)
+
+        _ ->
+            ("Expected MsgPack's Text, received -" ++ Basics.toString msgpack)
+                |> ConversionFailure
+                |> Err
 
 
 {-| @private
@@ -717,12 +867,12 @@ parseFloat32 r =
             Bitwise.shiftLeftBy 31 1
                 |> Bitwise.and rawBits
                 |> (\b -> -1 ^ b)
-                |> toFloat
+                |> Basics.toFloat
 
         exp =
             (Bitwise.shiftRightZfBy 23 rawBits |> Bitwise.and 0xFF)
                 - 127
-                |> toFloat
+                |> Basics.toFloat
 
         frac =
             Bitwise.and rawBits 0x007FFFFF
@@ -738,7 +888,7 @@ parseFloat32 r =
                                     |> Bitwise.and frac
                         in
                         if bit == 1 then
-                            fs + toFloat (2 ^ (-1 * i))
+                            fs + Basics.toFloat (2 ^ (-1 * i))
                         else
                             fs
                     )
@@ -765,12 +915,12 @@ parseFloat64 r =
             Bitwise.shiftLeftBy 63 1
                 |> Bitwise.and rawBits
                 |> (\b -> -1 ^ b)
-                |> toFloat
+                |> Basics.toFloat
 
         exp =
             (Bitwise.shiftRightZfBy 51 rawBits |> Bitwise.and 0x07FF)
                 - 1023
-                |> toFloat
+                |> Basics.toFloat
 
         frac =
             Bitwise.and rawBits 0x000FFFFFFFFFFFFF
@@ -786,7 +936,7 @@ parseFloat64 r =
                                     |> Bitwise.and frac
                         in
                         if bit == 1 then
-                            fs + toFloat (2 ^ (-1 * i))
+                            fs + Basics.toFloat (2 ^ (-1 * i))
                         else
                             fs
                     )
