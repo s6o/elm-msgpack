@@ -1,14 +1,13 @@
 {
     "version": "1.0.0",
-    "summary": "MessagePack decoding and encoding for Elm",
+    "summary": "MessagePack for Elm - https://msgpack.org",
     "repository": "https://github.com/s6o/elm-msgpack.git",
     "license": "MIT",
     "source-directories": [
         "src"
     ],
     "exposed-modules": [
-      "MsgPack",
-      "MsgPack.Format"
+        "MsgPack"
     ],
     "dependencies": {
         "elm-lang/core": "5.1.1 <= v < 6.0.0",

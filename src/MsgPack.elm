@@ -1,14 +1,26 @@
 module MsgPack
     exposing
-        ( MsgPack(..)
+        ( Error(..)
+        , Format
+        , MsgPack(..)
         , MsgPackValue
         , asBytes
+        , asString
         , fromMsgPack
         , toMsgPack
-        , toString
         )
 
-{-| MsgPack byte stream handling.
+{-| MessagePack for Elm.
+
+
+# Specification
+
+@docs Format, MsgPack, MsgPackValue, Error
+
+
+# Serialization / Deserialization
+
+@docs fromMsgPack, toMsgPack
 
 
 # HTTP
@@ -21,12 +33,7 @@ module MsgPack
 
 ## Request
 
-@docs toString
-
-
-# Serialization / Deserialization
-
-@docs MsgPack, MsgPackValue, fromMsgPack, toMsgPack
+@docs asString
 
 -}
 
@@ -34,29 +41,374 @@ import Array
 import Bitwise
 import Char
 import Dict exposing (Dict)
-import MsgPack.Error as Error exposing (Error)
-import MsgPack.Format as Fmt exposing (Format(..), Parsed)
 import Result exposing (Result)
 import String.UTF8 as Utf8
 
 
-{-| Convert to bytes from a string representation delivered as 'text/plain; charset=x-user-defined'.
+-- FORMAT
+
+
+{-| MessagePack's type specific data layout specifications.
 -}
-asBytes : String -> List Int
-asBytes bstr =
-    String.toList bstr
-        |> List.map (Char.toCode >> Bitwise.and 0xFF)
+type Format
+    = Nil_ DataLayout
+    | Array_ DataLayout
+    | Bin_ DataLayout
+    | Ext_ DataLayout
+    | False_ DataLayout
+    | FixArray_ DataLayout
+    | FixExt_ DataLayout
+    | FixMap_ DataLayout
+    | FixNegInt_ DataLayout
+    | FixPosInt_ DataLayout
+    | FixStr_ DataLayout
+    | Float_ DataLayout
+    | Map_ DataLayout
+    | Integer_ DataLayout
+    | Str_ DataLayout
+    | True_ DataLayout
+    | Unsigned_ DataLayout
 
 
-{-| Convert from bytes to string representation to be sent with the HTTP
-Content-Type header as 'text/plain; charset=x-user-defined'.
+{-| @private
+How is data length to be determined for a given `Format`.
 -}
-toString : List Int -> String
-toString bstr =
-    "TODO"
+type DataLayout
+    = Blocks Int Flag
+    | BlocksType Int Int Flag
+    | Bytes Int Flag
+    | Empty Flag
+    | Fixed FlagMasked
+    | TypeBytes Int Int Flag
 
 
-{-| Elm's MessagePack byte-stream wrapper.
+{-| @private
+MessagePack format marker byte.
+-}
+type Flag
+    = Flag Int
+
+
+{-| @private
+MessagePack format marker byte with a bit mask.
+-}
+type FlagMasked
+    = FlagMasked Int Int
+
+
+{-| @private
+Parsed data bytes, format header has been removed from `bytes` for given `Format`.
+-}
+type alias Parsed =
+    { format : Format
+    , bytes : List Int
+    , dataSize : Int
+    }
+
+
+{-| @private
+Detect MessagePack `Format` from specified byte value.
+-}
+toFormat : Int -> Maybe Format
+toFormat byte =
+    case byte of
+        0xC0 ->
+            -- nil
+            Just <| Nil_ <| Empty <| Flag byte
+
+        0xC2 ->
+            -- false
+            Just <| False_ <| Empty <| Flag byte
+
+        0xC3 ->
+            -- true
+            Just <| True_ <| Empty <| Flag byte
+
+        0xC4 ->
+            -- bin8
+            Just <| Bin_ <| Blocks 1 <| Flag byte
+
+        0xC5 ->
+            -- bin16
+            Just <| Bin_ <| Blocks 1 <| Flag byte
+
+        0xC6 ->
+            -- bin32
+            Just <| Bin_ <| Blocks 1 <| Flag byte
+
+        0xC7 ->
+            -- ext8
+            Just <| Ext_ <| BlocksType 1 1 <| Flag byte
+
+        0xC8 ->
+            -- ext16
+            Just <| Ext_ <| BlocksType 2 1 <| Flag byte
+
+        0xC9 ->
+            -- ext32
+            Just <| Ext_ <| BlocksType 4 1 <| Flag byte
+
+        0xCA ->
+            -- float32
+            Just <| Float_ <| Bytes 4 <| Flag byte
+
+        0xCB ->
+            -- float64
+            Just <| Float_ <| Bytes 8 <| Flag byte
+
+        0xCC ->
+            -- uint8
+            Just <| Unsigned_ <| Bytes 1 <| Flag byte
+
+        0xCD ->
+            -- uint16
+            Just <| Unsigned_ <| Bytes 2 <| Flag byte
+
+        0xCE ->
+            -- uint32
+            Just <| Unsigned_ <| Bytes 4 <| Flag byte
+
+        0xCF ->
+            -- uint64
+            Just <| Unsigned_ <| Bytes 8 <| Flag byte
+
+        0xD0 ->
+            -- int8
+            Just <| Integer_ <| Bytes 1 <| Flag byte
+
+        0xD1 ->
+            -- int16
+            Just <| Integer_ <| Bytes 2 <| Flag byte
+
+        0xD2 ->
+            -- int32
+            Just <| Integer_ <| Bytes 4 <| Flag byte
+
+        0xD3 ->
+            Just <| Integer_ <| Bytes 8 <| Flag byte
+
+        0xD4 ->
+            -- fixext1
+            Just <| FixExt_ <| TypeBytes 1 1 <| Flag byte
+
+        0xD5 ->
+            -- fixext2
+            Just <| FixExt_ <| TypeBytes 1 2 <| Flag byte
+
+        0xD6 ->
+            -- fixext4
+            Just <| FixExt_ <| TypeBytes 1 4 <| Flag byte
+
+        0xD7 ->
+            -- fixext8
+            Just <| FixExt_ <| TypeBytes 1 8 <| Flag byte
+
+        0xD8 ->
+            -- fixext16
+            Just <| FixExt_ <| TypeBytes 1 16 <| Flag byte
+
+        0xD9 ->
+            -- str8
+            Just <| Str_ <| Blocks 1 <| Flag byte
+
+        0xDA ->
+            -- str16
+            Just <| Str_ <| Blocks 2 <| Flag byte
+
+        0xDB ->
+            -- str32
+            Just <| Str_ <| Blocks 4 <| Flag byte
+
+        0xDC ->
+            -- array16
+            Just <| Array_ <| Blocks 2 <| Flag byte
+
+        0xDD ->
+            -- array32
+            Just <| Array_ <| Blocks 4 <| Flag byte
+
+        0xDE ->
+            -- map16
+            Just <| Map_ <| Blocks 2 <| Flag byte
+
+        0xDF ->
+            -- map32
+            Just <| Map_ <| Blocks 4 <| Flag byte
+
+        _ ->
+            if byte >= 0x00 && byte <= 0x7F then
+                -- pos fixint
+                Just <| FixPosInt_ <| Fixed <| FlagMasked byte 0x7F
+            else if byte >= 0x80 && byte <= 0x8F then
+                -- fixmap
+                Just <| Map_ <| Fixed <| FlagMasked byte 0x0F
+            else if byte >= 0x90 && byte <= 0x9F then
+                -- fixarray
+                Just <| Array_ <| Fixed <| FlagMasked byte 0x0F
+            else if byte >= 0xA0 && byte <= 0xBF then
+                -- fixstr
+                Just <| Str_ <| Fixed <| FlagMasked byte 0x1F
+            else if byte >= 0xE0 && byte <= 0xFF then
+                -- neg fixint
+                Just <| FixNegInt_ <| Fixed <| FlagMasked byte 0x1F
+            else
+                Nothing
+
+
+{-| @private
+Parse chunk of data bytes accordingly to `Format`.
+-}
+parseFormat : Maybe Format -> List Int -> Result Error Parsed
+parseFormat fmt bytes =
+    fmt
+        |> Maybe.map
+            (\f ->
+                let
+                    d =
+                        dataLayout f
+                in
+                case f of
+                    FixNegInt_ (Fixed (FlagMasked byte mask)) ->
+                        { format = f
+                        , bytes = List.drop 1 bytes
+                        , dataSize = byte
+                        }
+
+                    FixPosInt_ (Fixed (FlagMasked byte mask)) ->
+                        { format = f
+                        , bytes = List.drop 1 bytes
+                        , dataSize = Bitwise.and byte mask
+                        }
+
+                    _ ->
+                        { format = f
+                        , bytes = List.drop (1 + blockCount d) bytes
+                        , dataSize = dataLength d bytes
+                        }
+            )
+        |> Result.fromMaybe UnknownFormat
+
+
+{-| @private
+Get data layout from `Format`.
+-}
+dataLayout : Format -> DataLayout
+dataLayout fmt =
+    case fmt of
+        Nil_ d ->
+            d
+
+        Array_ d ->
+            d
+
+        Bin_ d ->
+            d
+
+        Ext_ d ->
+            d
+
+        False_ d ->
+            d
+
+        FixArray_ d ->
+            d
+
+        FixExt_ d ->
+            d
+
+        FixMap_ d ->
+            d
+
+        FixNegInt_ d ->
+            d
+
+        FixPosInt_ d ->
+            d
+
+        FixStr_ d ->
+            d
+
+        Float_ d ->
+            d
+
+        Map_ d ->
+            d
+
+        Integer_ d ->
+            d
+
+        Str_ d ->
+            d
+
+        True_ d ->
+            d
+
+        Unsigned_ d ->
+            d
+
+
+{-| @private
+Number of data bytes accordingly `Format`'s data layout.
+-}
+dataLength : DataLayout -> List Int -> Int
+dataLength data bytes =
+    case data of
+        Blocks c _ ->
+            List.drop 1 bytes
+                |> List.take c
+                |> byteValue
+
+        BlocksType c _ _ ->
+            List.drop 1 bytes
+                |> List.take c
+                |> byteValue
+
+        Bytes c _ ->
+            c
+
+        Empty _ ->
+            0
+
+        Fixed _ ->
+            1
+
+        TypeBytes t c _ ->
+            t + c
+
+
+{-| @private
+Number of bytes used for block specifing data length.
+-}
+blockCount : DataLayout -> Int
+blockCount data =
+    case data of
+        Blocks c _ ->
+            c
+
+        BlocksType c _ _ ->
+            c
+
+        _ ->
+            0
+
+
+{-| @private
+Given a number of bytes in big-endian, construct an integer value.
+-}
+byteValue : List Int -> Int
+byteValue bytes =
+    bytes
+        |> List.foldr
+            (\b ( a, bi ) -> ( a + Bitwise.shiftLeftBy (bi * 8) b, bi + 1 ))
+            ( 0, 0 )
+        |> (\( a, _ ) -> a)
+
+
+
+-- MessagePack
+
+
+{-| Elm's MessagePack types.
 
 To limit name conflicts some of MessagePack specification types are renamed:
 
@@ -82,8 +434,16 @@ type MsgPack
 -}
 type alias MsgPackValue d =
     { format : Format
-    , data : Maybe d
+    , value : Maybe d
     }
+
+
+{-| MessagePack processing errors.
+-}
+type Error
+    = AppendFailure String
+    | EmptyStream
+    | UnknownFormat
 
 
 {-| Serialize to list of bytes.
@@ -105,12 +465,12 @@ toMsgPack bytes =
         parse blist accum =
             case blist of
                 [] ->
-                    Result.fromMaybe Error.EmptyStream accum
+                    Result.fromMaybe EmptyStream accum
 
                 b :: list ->
                     case
-                        Fmt.format b
-                            |> parseFormat ( accum, b :: list )
+                        toFormat b
+                            |> parseMsgPack ( accum, b :: list )
                     of
                         Err error ->
                             Err error
@@ -129,47 +489,47 @@ toMsgPack bytes =
 
 {-| @private
 -}
-parseFormat : ( Maybe MsgPack, List Int ) -> Maybe Format -> Result Error ( MsgPack, List Int )
-parseFormat ( msgpack, bytes ) fmt =
-    Fmt.parse fmt bytes
+parseMsgPack : ( Maybe MsgPack, List Int ) -> Maybe Format -> Result Error ( MsgPack, List Int )
+parseMsgPack ( msgpack, bytes ) fmt =
+    parseFormat fmt bytes
         |> Result.map
             (\r ->
                 case r.format of
-                    Fmt.Nil _ ->
-                        ( Nil { format = r.format, data = Nothing }
+                    Nil_ _ ->
+                        ( Nil { format = r.format, value = Nothing }
                         , r.bytes
                         )
 
-                    Fmt.Array_ _ ->
+                    Array_ _ ->
                         parseArray r
 
-                    Fmt.Bin _ ->
+                    Bin_ _ ->
                         ( Blob
                             { format = r.format
-                            , data = Just <| List.take r.dataSize r.bytes
+                            , value = Just <| List.take r.dataSize r.bytes
                             }
                         , List.drop r.dataSize r.bytes
                         )
 
-                    Fmt.Ext _ ->
+                    Ext_ _ ->
                         parseExtension r
 
-                    Fmt.False_ _ ->
+                    False_ _ ->
                         parseBoolean r False
 
-                    Fmt.FixArray _ ->
+                    FixArray_ _ ->
                         parseArray r
 
-                    Fmt.FixExt _ ->
+                    FixExt_ _ ->
                         parseExtension r
 
-                    Fmt.FixMap _ ->
+                    FixMap_ _ ->
                         parseMap r
 
-                    Fmt.FixNegInt _ ->
+                    FixNegInt_ _ ->
                         ( Integer
                             { format = r.format
-                            , data =
+                            , value =
                                 Bitwise.and r.dataSize 0xFF
                                     |> Bitwise.or 0x000FFFFFFFFFFF00
                                     |> Just
@@ -177,36 +537,36 @@ parseFormat ( msgpack, bytes ) fmt =
                         , r.bytes
                         )
 
-                    Fmt.FixPosInt _ ->
+                    FixPosInt_ _ ->
                         ( Integer
                             { format = r.format
-                            , data = Just r.dataSize
+                            , value = Just r.dataSize
                             }
                         , r.bytes
                         )
 
-                    Fmt.FixStr _ ->
+                    FixStr_ _ ->
                         parseText r
 
-                    Fmt.Float_ _ ->
+                    Float_ _ ->
                         if r.dataSize == 4 then
                             parseFloat32 r
                         else
                             parseFloat64 r
 
-                    Fmt.Map _ ->
+                    Map_ _ ->
                         parseMap r
 
-                    Fmt.Integer _ ->
+                    Integer_ _ ->
                         parseInteger r
 
-                    Fmt.Str _ ->
+                    Str_ _ ->
                         parseText r
 
-                    Fmt.True_ _ ->
+                    True_ _ ->
                         parseBoolean r True
 
-                    Fmt.Unsigned _ ->
+                    Unsigned_ _ ->
                         parseUnsigned r
             )
 
@@ -220,7 +580,7 @@ append item collection =
         Map r ->
             Map
                 { r
-                    | data =
+                    | value =
                         Maybe.map
                             (\d ->
                                 case Dict.get appendKey d of
@@ -231,17 +591,17 @@ append item collection =
                                         Dict.insert (asKey kv) item d
                                             |> Dict.remove appendKey
                             )
-                            r.data
+                            r.value
                 }
                 |> Ok
 
         Vector r ->
-            Vector { r | data = r.data |> Maybe.map (\l -> l ++ [ item ]) }
+            Vector { r | value = r.value |> Maybe.map (\l -> l ++ [ item ]) }
                 |> Ok
 
         _ ->
             "2nd argument needs to be a MsgPack collection type: Map or Vector."
-                |> Error.AppendFailure
+                |> AppendFailure
                 |> Err
 
 
@@ -254,7 +614,7 @@ appendKey =
 
 
 {-| @private
-Convert `MsgPack`'s `MsgPackValue` type's `data` member value to `String`.
+Convert `MsgPack`'s `MsgPackValue` type's `value` member value to `String`.
 -}
 asKey : MsgPack -> String
 asKey msgpack =
@@ -262,18 +622,18 @@ asKey msgpack =
         Nil _ ->
             "__elm-msgpack-nil__"
 
-        Blob { data } ->
-            data
+        Blob { value } ->
+            value
                 |> Maybe.map (\bytes -> Utf8.toString bytes |> Result.withDefault "__elm-msgpack-bin__")
                 |> Maybe.withDefault "__elm-msgpack-bin__"
 
-        Boolean { data } ->
-            data
+        Boolean { value } ->
+            value
                 |> Maybe.map (\b -> "__elm-msgpack-bool-" ++ Basics.toString b ++ "__")
                 |> Maybe.withDefault "__elm-msgpack-bool__"
 
-        Extension { data } ->
-            data
+        Extension { value } ->
+            value
                 |> Maybe.map
                     (\( _, b ) ->
                         Utf8.toString b
@@ -281,51 +641,57 @@ asKey msgpack =
                     )
                 |> Maybe.withDefault "__elm-msgpack-ext__"
 
-        Double { data } ->
-            data
+        Double { value } ->
+            value
                 |> Maybe.map Basics.toString
                 |> Maybe.withDefault "__elm-msgpack-double__"
 
-        Integer { data } ->
-            data
+        Integer { value } ->
+            value
                 |> Maybe.map Basics.toString
                 |> Maybe.withDefault "__elm-msgpack-integer__"
 
-        Map { data } ->
-            data
+        Map { value } ->
+            value
                 |> Maybe.map Basics.toString
                 |> Maybe.withDefault "__elm-msgpack-map__"
 
-        Text { data } ->
-            data
+        Text { value } ->
+            value
                 |> Maybe.map identity
                 |> Maybe.withDefault "__elm-msgpack-text__"
 
-        Vector { data } ->
-            data
+        Vector { value } ->
+            value
                 |> Maybe.map Basics.toString
                 |> Maybe.withDefault "__elm-msgpack-vector__"
 
 
+{-| @private
+-}
 parseArray : Parsed -> ( MsgPack, List Int )
 parseArray r =
-    ( Vector { format = r.format, data = Just [] }
+    ( Vector { format = r.format, value = Just [] }
     , r.bytes
     )
 
 
+{-| @private
+-}
 parseBoolean : Parsed -> Bool -> ( MsgPack, List Int )
 parseBoolean r flag =
-    ( Boolean { format = r.format, data = Just flag }
+    ( Boolean { format = r.format, value = Just flag }
     , r.bytes
     )
 
 
+{-| @private
+-}
 parseExtension : Parsed -> ( MsgPack, List Int )
 parseExtension r =
     ( Extension
         { format = r.format
-        , data =
+        , value =
             Just
                 ( List.take 1 r.bytes
                     |> List.head
@@ -338,12 +704,14 @@ parseExtension r =
     )
 
 
+{-| @private
+-}
 parseFloat32 : Parsed -> ( MsgPack, List Int )
 parseFloat32 r =
     let
         rawBits =
             List.take r.dataSize r.bytes
-                |> Fmt.byteValue
+                |> byteValue
 
         sign =
             Bitwise.shiftLeftBy 31 1
@@ -378,18 +746,20 @@ parseFloat32 r =
     in
     ( Double
         { format = r.format
-        , data = Just <| sign * (fsum * (2 ^ exp))
+        , value = Just <| sign * (fsum * (2 ^ exp))
         }
     , List.drop r.dataSize r.bytes
     )
 
 
+{-| @private
+-}
 parseFloat64 : Parsed -> ( MsgPack, List Int )
 parseFloat64 r =
     let
         rawBits =
             List.take r.dataSize r.bytes
-                |> Fmt.byteValue
+                |> byteValue
 
         sign =
             Bitwise.shiftLeftBy 63 1
@@ -424,12 +794,14 @@ parseFloat64 r =
     in
     ( Double
         { format = r.format
-        , data = Just <| sign * (fsum * (2 ^ exp))
+        , value = Just <| sign * (fsum * (2 ^ exp))
         }
     , List.drop r.dataSize r.bytes
     )
 
 
+{-| @private
+-}
 parseInteger : Parsed -> ( MsgPack, List Int )
 parseInteger r =
     let
@@ -451,25 +823,29 @@ parseInteger r =
     in
     ( Integer
         { format = r.format
-        , data =
+        , value =
             Just <| value
         }
     , List.drop r.dataSize r.bytes
     )
 
 
+{-| @private
+-}
 parseMap : Parsed -> ( MsgPack, List Int )
 parseMap r =
-    ( Map { format = r.format, data = Just <| Dict.empty }
+    ( Map { format = r.format, value = Just <| Dict.empty }
     , r.bytes
     )
 
 
+{-| @private
+-}
 parseText : Parsed -> ( MsgPack, List Int )
 parseText r =
     ( Text
         { format = r.format
-        , data =
+        , value =
             List.take r.dataSize r.bytes
                 |> Utf8.toString
                 |> Result.withDefault ""
@@ -479,8 +855,30 @@ parseText r =
     )
 
 
+{-| @private
+-}
 parseUnsigned : Parsed -> ( MsgPack, List Int )
 parseUnsigned r =
-    ( Integer { format = r.format, data = Just <| Fmt.byteValue <| List.take r.dataSize r.bytes }
+    ( Integer { format = r.format, value = Just <| byteValue <| List.take r.dataSize r.bytes }
     , List.drop r.dataSize r.bytes
     )
+
+
+
+-- HTTP
+
+
+{-| Convert to bytes from a string representation delivered as 'text/plain; charset=x-user-defined'.
+-}
+asBytes : String -> List Int
+asBytes bstr =
+    String.toList bstr
+        |> List.map (Char.toCode >> Bitwise.and 0xFF)
+
+
+{-| Convert from bytes to a string representation to be sent with the HTTP
+Content-Type header set to 'text/plain; charset=x-user-defined'.
+-}
+asString : List Int -> String
+asString bstr =
+    "TODO"
