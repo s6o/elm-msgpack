@@ -6,15 +6,15 @@ module MsgPack
         , MsgPackValue
         , asBytes
         , asString
-        , fromMsgPack
+        , pack
         , toBool
         , toBytes
         , toDict
         , toFloat
         , toInt
         , toList
-        , toMsgPack
         , toString
+        , unpack
         )
 
 {-| MessagePack for Elm.
@@ -27,7 +27,7 @@ module MsgPack
 
 # Serialization / Deserialization
 
-@docs fromMsgPack, toMsgPack
+@docs pack, unpack
 
 
 # Conversions
@@ -462,8 +462,8 @@ type Error
 
 {-| Serialize to list of bytes.
 -}
-fromMsgPack : MsgPack -> List Int
-fromMsgPack msgpack =
+pack : MsgPack -> List Int
+pack msgpack =
     []
 
 
@@ -473,8 +473,8 @@ As with JSON, the MessagePack byte stream has to start with a container: Map or
 Vector (array).
 
 -}
-toMsgPack : List Int -> Result Error MsgPack
-toMsgPack bytes =
+unpack : List Int -> Result Error MsgPack
+unpack bytes =
     let
         parse blist accum =
             case blist of
