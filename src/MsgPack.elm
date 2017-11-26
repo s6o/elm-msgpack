@@ -6,6 +6,8 @@ module MsgPack
         , MsgPackValue
         , asBytes
         , asString
+        , isEmpty
+        , isNil
         , pack
         , toBool
         , toBytes
@@ -32,7 +34,7 @@ module MsgPack
 
 # Conversions
 
-@docs toBool, toBytes, toDict, toFloat, toInt, toList, toString
+@docs isEmpty, isNil, toBool, toBytes, toDict, toFloat, toInt, toList, toString
 
 
 # HTTP
@@ -89,8 +91,8 @@ type DataLayout
     = Blocks Int Flag
     | BlocksType Int Int Flag
     | Bytes Int Flag
-    | Empty Flag
     | Fixed FlagMasked
+    | None Flag
     | TypeBytes Int Int Flag
 
 
@@ -126,15 +128,15 @@ toFormat byte =
     case byte of
         0xC0 ->
             -- nil
-            Just <| Nil_ <| Empty <| Flag byte
+            Just <| Nil_ <| None <| Flag byte
 
         0xC2 ->
             -- false
-            Just <| False_ <| Empty <| Flag byte
+            Just <| False_ <| None <| Flag byte
 
         0xC3 ->
             -- true
-            Just <| True_ <| Empty <| Flag byte
+            Just <| True_ <| None <| Flag byte
 
         0xC4 ->
             -- bin8
@@ -378,7 +380,7 @@ dataLength data bytes =
         Bytes c _ ->
             c
 
-        Empty _ ->
+        None _ ->
             0
 
         Fixed (FlagMasked byte mask) ->
@@ -431,7 +433,8 @@ To limit name conflicts some of MessagePack specification types are renamed:
 
 -}
 type MsgPack
-    = Nil (MsgPackValue Never)
+    = Empty
+    | Nil (MsgPackValue Never)
     | Blob (MsgPackValue (List Int))
     | Boolean (MsgPackValue Bool)
     | Extension (MsgPackValue ( Int, List Int ))
@@ -454,7 +457,6 @@ type alias MsgPackValue d =
 -}
 type Error
     = AppendFailure String
-    | EmptyStream
     | ConversionFailure String
     | UnknownFormat
     | ValueNotSet
@@ -481,7 +483,7 @@ unpack bytes =
                 [] ->
                     case List.head accum of
                         Nothing ->
-                            Err EmptyStream
+                            Ok Empty
 
                         Just ( ct, _ ) ->
                             Ok ct
@@ -540,6 +542,30 @@ unpack bytes =
                             parse next nextAccum
     in
     parse bytes []
+
+
+{-| Check if `MsgPack` result is empty.
+-}
+isEmpty : MsgPack -> Bool
+isEmpty msgpack =
+    case msgpack of
+        Empty ->
+            True
+
+        _ ->
+            False
+
+
+{-| Check if `MsgPack` value is Nil.
+-}
+isNil : MsgPack -> Bool
+isNil msgpack =
+    case msgpack of
+        Nil _ ->
+            True
+
+        _ ->
+            False
 
 
 {-| Convert from `MsgPack`'s Boolean to Elm's Bool.
@@ -810,6 +836,9 @@ Convert `MsgPack`'s `MsgPackValue` type's `value` member value to `String`.
 asKey : MsgPack -> String
 asKey msgpack =
     case msgpack of
+        Empty ->
+            "__elm-msgpack-empty__"
+
         Nil _ ->
             "__elm-msgpack-nil__"
 
