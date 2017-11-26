@@ -479,26 +479,67 @@ unpack bytes =
         parse blist accum =
             case blist of
                 [] ->
-                    Result.fromMaybe EmptyStream accum
+                    case List.head accum of
+                        Nothing ->
+                            Err EmptyStream
+
+                        Just ( ct, _ ) ->
+                            Ok ct
 
                 b :: list ->
                     case
                         toFormat b
-                            |> parseMsgPack ( accum, b :: list )
+                            |> parseMsgPack (b :: list)
                     of
                         Err error ->
                             Err error
 
                         Ok ( mp, next ) ->
                             let
+                                bytes =
+                                    b :: list
+
                                 nextAccum =
-                                    Maybe.map (append mp) accum
-                                        |> Maybe.withDefault (Ok mp)
-                                        |> Result.toMaybe
+                                    case mp of
+                                        Map { format } ->
+                                            ( mp, 2 * dataLength (dataLayout format) bytes ) :: accum
+
+                                        Vector { format } ->
+                                            ( mp, dataLength (dataLayout format) bytes ) :: accum
+
+                                        _ ->
+                                            case accum of
+                                                [] ->
+                                                    accum
+
+                                                ( collection, itemCount ) :: rest ->
+                                                    let
+                                                        newCollection =
+                                                            append mp collection
+                                                    in
+                                                    case newCollection of
+                                                        Err _ ->
+                                                            ( collection, itemCount ) :: rest
+
+                                                        Ok nc ->
+                                                            if itemCount - 1 == 0 then
+                                                                case rest of
+                                                                    [] ->
+                                                                        rest
+
+                                                                    ( ct, ic ) :: accums ->
+                                                                        case append nc ct of
+                                                                            Err _ ->
+                                                                                ( ct, ic ) :: accums
+
+                                                                            Ok c ->
+                                                                                ( c, ic - 1 ) :: accums
+                                                            else
+                                                                ( nc, itemCount - 1 ) :: rest
                             in
                             parse next nextAccum
     in
-    parse bytes Nothing
+    parse bytes []
 
 
 {-| Convert from `MsgPack`'s Boolean to Elm's Bool.
@@ -639,8 +680,8 @@ toString msgpack =
 
 {-| @private
 -}
-parseMsgPack : ( Maybe MsgPack, List Int ) -> Maybe Format -> Result Error ( MsgPack, List Int )
-parseMsgPack ( msgpack, bytes ) fmt =
+parseMsgPack : List Int -> Maybe Format -> Result Error ( MsgPack, List Int )
+parseMsgPack bytes fmt =
     parseFormat fmt bytes
         |> Result.map
             (\r ->
