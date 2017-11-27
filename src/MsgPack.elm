@@ -1,12 +1,23 @@
 module MsgPack
     exposing
         ( Error(..)
-        , MsgPack(..)
+        , MsgPack
         , asBytes
         , asString
+        , bin
+        , bool
+        , decode
+        , empty
+        , encode
+        , ext
+        , float
+        , int
         , isEmpty
         , isNil
-        , pack
+        , list
+        , nil
+        , object
+        , string
         , toBool
         , toBytes
         , toDict
@@ -15,7 +26,6 @@ module MsgPack
         , toJson
         , toList
         , toString
-        , unpack
         )
 
 {-| MessagePack for Elm.
@@ -26,14 +36,29 @@ module MsgPack
 @docs MsgPack, Error
 
 
-# Serialization / Deserialization
+# Decoding
 
-@docs pack, unpack
+@docs decode
 
 
-# Conversions
+## Conversions
 
 @docs isEmpty, isNil, toBool, toBytes, toDict, toFloat, toInt, toJson, toList, toString
+
+
+# Encoding
+
+@docs encode
+
+
+## Primitivies
+
+@docs empty, nil, bin, bool, float, ext, int, string
+
+
+## Containers
+
+@docs list, object
 
 
 # HTTP
@@ -423,11 +448,17 @@ byteValue bytes =
 
 {-| Elm's MessagePack types.
 
-Due to name conflicts some of MessagePack specification types are renamed:
+        MessagePack     Elm
 
-    Array -> Vector
-    Float -> Double
-    String -> Text
+        Nil                             -- helpers: isNil, nil
+        Array           List MsgPack    -- note: in Elm 0.18 bigger `Array`s have issues
+        Binary          List Int        -- list of byte values
+        Boolean         Bool
+        Extension       (Int, List Int) -- byte and list of bytes tuple
+        Float           Float
+        Integer         Int
+        Map             Dict String MsgPack
+        String          String
 
 -}
 type MsgPack
@@ -451,21 +482,14 @@ type Error
     | UnknownFormat
 
 
-{-| Serialize to list of bytes.
--}
-pack : MsgPack -> List Int
-pack msgpack =
-    []
+{-| Decode a list of bytes into `MsgPack`.
 
-
-{-| Deserialize a list of bytes into `MsgPack`.
-
-As with JSON, the MessagePack byte stream has to start with a container: Map or
-Vector (array).
+As with JSON, the MessagePack byte stream has to start with a container: object or
+array.
 
 -}
-unpack : List Int -> Result Error MsgPack
-unpack bytes =
+decode : List Int -> Result Error MsgPack
+decode bytes =
     let
         parse blist accum =
             case blist of
@@ -1030,14 +1054,85 @@ parseUnsigned r =
 
 
 
+-- ENCODING
+
+
+{-| Encode to list of bytes.
+-}
+encode : MsgPack -> List Int
+encode msgpack =
+    []
+
+
+{-| -}
+empty : MsgPack
+empty =
+    Empty
+
+
+{-| -}
+nil : MsgPack
+nil =
+    Nil
+
+
+{-| -}
+bin : List Int -> MsgPack
+bin list =
+    Bin list
+
+
+{-| -}
+bool : Bool -> MsgPack
+bool flag =
+    Boolean flag
+
+
+{-| -}
+ext : ( Int, List Int ) -> MsgPack
+ext t =
+    Extension t
+
+
+{-| -}
+float : Float -> MsgPack
+float v =
+    Double v
+
+
+{-| -}
+int : Int -> MsgPack
+int v =
+    Integer v
+
+
+{-| -}
+string : String -> MsgPack
+string v =
+    Text v
+
+
+{-| -}
+list : List MsgPack -> MsgPack
+list mpl =
+    Vector (List.length mpl) mpl
+
+
+{-| -}
+object : List ( String, MsgPack ) -> MsgPack
+object mpl =
+    Map (List.length mpl) (Dict.fromList mpl)
+
+
+
 -- HTTP
 
 
 {-| Convert to bytes from a string representation delivered as 'text/plain; charset=x-user-defined'.
 -}
 asBytes : String -> List Int
-asBytes bstr =
-    String.toList bstr
+asBytes binstr =
+    String.toList binstr
         |> List.map (Char.toCode >> Bitwise.and 0xFF)
 
 
@@ -1045,5 +1140,6 @@ asBytes bstr =
 Content-Type header set to 'text/plain; charset=x-user-defined'.
 -}
 asString : List Int -> String
-asString bstr =
-    "TODO"
+asString bytes =
+    List.map Char.fromCode bytes
+        |> String.fromList
