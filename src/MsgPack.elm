@@ -14,6 +14,7 @@ module MsgPack
         , toDict
         , toFloat
         , toInt
+        , toJson
         , toList
         , toString
         , unpack
@@ -34,7 +35,7 @@ module MsgPack
 
 # Conversions
 
-@docs isEmpty, isNil, toBool, toBytes, toDict, toFloat, toInt, toList, toString
+@docs isEmpty, isNil, toBool, toBytes, toDict, toFloat, toInt, toJson, toList, toString
 
 
 # HTTP
@@ -54,6 +55,7 @@ module MsgPack
 import Bitwise
 import Char
 import Dict exposing (Dict)
+import Json.Encode exposing (Value)
 import Result exposing (Result)
 import String.UTF8 as Utf8
 
@@ -672,6 +674,84 @@ toInt msgpack =
 
         _ ->
             ("Expected MsgPack's Integer, received -" ++ Basics.toString msgpack)
+                |> ConversionFailure
+                |> Err
+
+
+{-| Convert from `MsgPack` to `Json.Encode.Value`.
+-}
+toJson : MsgPack -> Result Error Value
+toJson msgpack =
+    let
+        asJson mp =
+            case mp of
+                Empty ->
+                    Json.Encode.null
+
+                Nil _ ->
+                    Json.Encode.null
+
+                Blob { value } ->
+                    value
+                        |> Maybe.map (List.map Json.Encode.int >> Json.Encode.list)
+                        |> Maybe.withDefault (Json.Encode.list [])
+
+                Boolean { value } ->
+                    value
+                        |> Maybe.map Json.Encode.bool
+                        |> Maybe.withDefault Json.Encode.null
+
+                Extension { value } ->
+                    value
+                        |> Maybe.map
+                            (\( t, bytes ) ->
+                                (t :: bytes)
+                                    |> List.map Json.Encode.int
+                                    |> Json.Encode.list
+                            )
+                        |> Maybe.withDefault (Json.Encode.list [])
+
+                Double { value } ->
+                    value
+                        |> Maybe.map Json.Encode.float
+                        |> Maybe.withDefault Json.Encode.null
+
+                Integer { value } ->
+                    value
+                        |> Maybe.map Json.Encode.int
+                        |> Maybe.withDefault Json.Encode.null
+
+                Map { value } ->
+                    value
+                        |> Maybe.map
+                            (\d ->
+                                Dict.map (\_ v -> asJson v) d
+                                    |> Dict.toList
+                                    |> Json.Encode.object
+                            )
+                        |> Maybe.withDefault (Json.Encode.object [])
+
+                Text { value } ->
+                    value
+                        |> Maybe.map Json.Encode.string
+                        |> Maybe.withDefault Json.Encode.null
+
+                Vector { value } ->
+                    value
+                        |> Maybe.map (List.map asJson >> Json.Encode.list)
+                        |> Maybe.withDefault (Json.Encode.list [])
+    in
+    case msgpack of
+        Map _ ->
+            asJson msgpack
+                |> Ok
+
+        Vector _ ->
+            asJson msgpack
+                |> Ok
+
+        _ ->
+            ("Expected MsgPack's Map or Vector, received - " ++ Basics.toString msgpack)
                 |> ConversionFailure
                 |> Err
 
