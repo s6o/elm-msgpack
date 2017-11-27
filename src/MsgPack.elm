@@ -1,9 +1,7 @@
 module MsgPack
     exposing
         ( Error(..)
-        , Format
         , MsgPack(..)
-        , MsgPackValue
         , asBytes
         , asString
         , isEmpty
@@ -25,7 +23,7 @@ module MsgPack
 
 # Specification
 
-@docs Format, MsgPack, MsgPackValue, Error
+@docs MsgPack, Error
 
 
 # Serialization / Deserialization
@@ -425,33 +423,24 @@ byteValue bytes =
 
 {-| Elm's MessagePack types.
 
-To limit name conflicts some of MessagePack specification types are renamed:
+Due to name conflicts some of MessagePack specification types are renamed:
 
     Array -> Vector
-    Bin -> Blob
     Float -> Double
     String -> Text
 
 -}
 type MsgPack
     = Empty
-    | Nil (MsgPackValue Never)
-    | Blob (MsgPackValue (List Int))
-    | Boolean (MsgPackValue Bool)
-    | Extension (MsgPackValue ( Int, List Int ))
-    | Double (MsgPackValue Float)
-    | Integer (MsgPackValue Int)
-    | Map (MsgPackValue (Dict String MsgPack))
-    | Text (MsgPackValue String)
-    | Vector (MsgPackValue (List MsgPack))
-
-
-{-| Generic `MsgPack` value container.
--}
-type alias MsgPackValue d =
-    { format : Format
-    , value : Maybe d
-    }
+    | Nil
+    | Bin (List Int)
+    | Boolean Bool
+    | Extension ( Int, List Int )
+    | Double Float
+    | Integer Int
+    | Map Int (Dict String MsgPack)
+    | Text String
+    | Vector Int (List MsgPack)
 
 
 {-| MessagePack processing errors.
@@ -460,7 +449,6 @@ type Error
     = AppendFailure String
     | ConversionFailure String
     | UnknownFormat
-    | ValueNotSet
 
 
 {-| Serialize to list of bytes.
@@ -499,16 +487,13 @@ unpack bytes =
 
                         Ok ( mp, next ) ->
                             let
-                                bytes =
-                                    b :: list
-
                                 nextAccum =
                                     case mp of
-                                        Map { format } ->
-                                            ( mp, 2 * dataLength (dataLayout format) bytes ) :: accum
+                                        Map itemCount _ ->
+                                            ( mp, 2 * itemCount ) :: accum
 
-                                        Vector { format } ->
-                                            ( mp, dataLength (dataLayout format) bytes ) :: accum
+                                        Vector itemCount _ ->
+                                            ( mp, itemCount ) :: accum
 
                                         _ ->
                                             unpackItem mp accum
@@ -565,7 +550,7 @@ isEmpty msgpack =
 isNil : MsgPack -> Bool
 isNil msgpack =
     case msgpack of
-        Nil _ ->
+        Nil ->
             True
 
         _ ->
@@ -577,9 +562,8 @@ isNil msgpack =
 toBool : MsgPack -> Result Error Bool
 toBool msgpack =
     case msgpack of
-        Boolean { value } ->
-            Maybe.map Ok value
-                |> Maybe.withDefault (Err ValueNotSet)
+        Boolean value ->
+            Ok value
 
         _ ->
             ("Expected MsgPack's Boolean, received -" ++ Basics.toString msgpack)
@@ -587,22 +571,20 @@ toBool msgpack =
                 |> Err
 
 
-{-| Convert from `MsgPack`'s Blob or Extension to a list of bytes.
+{-| Convert from `MsgPack`'s Bin or Extension to a list of bytes.
 In case of Extension the first byte in the list represents the 'type' byte.
 -}
 toBytes : MsgPack -> Result Error (List Int)
 toBytes msgpack =
     case msgpack of
-        Blob { value } ->
-            Maybe.map Ok value
-                |> Maybe.withDefault (Err ValueNotSet)
+        Bin value ->
+            Ok value
 
-        Extension { value } ->
-            Maybe.map (\( t, bytes ) -> Ok <| t :: bytes) value
-                |> Maybe.withDefault (Err ValueNotSet)
+        Extension ( t, bytes ) ->
+            Ok <| (t :: bytes)
 
         _ ->
-            ("Expected MsgPack's Blob or Extension, received -" ++ Basics.toString msgpack)
+            ("Expected MsgPack's Bin or Extension, received -" ++ Basics.toString msgpack)
                 |> ConversionFailure
                 |> Err
 
@@ -612,9 +594,8 @@ toBytes msgpack =
 toDict : MsgPack -> Result Error (Dict String MsgPack)
 toDict msgpack =
     case msgpack of
-        Map { value } ->
-            Maybe.map Ok value
-                |> Maybe.withDefault (Err ValueNotSet)
+        Map _ value ->
+            Ok value
 
         _ ->
             ("Expected MsgPack's Map, received -" ++ Basics.toString msgpack)
@@ -627,22 +608,16 @@ toDict msgpack =
 toFloat : MsgPack -> Result Error Float
 toFloat msgpack =
     case msgpack of
-        Double { value } ->
-            Maybe.map Ok value
-                |> Maybe.withDefault (Err ValueNotSet)
+        Double value ->
+            Ok value
 
-        Text { value } ->
-            value
-                |> Maybe.map
-                    (\v ->
-                        String.toFloat v
-                            |> Result.mapError
-                                (\x ->
-                                    ("Conversion failure from MsgPack's Text to Float -" ++ x)
-                                        |> ConversionFailure
-                                )
+        Text value ->
+            String.toFloat value
+                |> Result.mapError
+                    (\x ->
+                        ("Conversion failure from MsgPack's Text to Float -" ++ x)
+                            |> ConversionFailure
                     )
-                |> Maybe.withDefault (Err ValueNotSet)
 
         _ ->
             ("Expected MsgPack's Double, received -" ++ Basics.toString msgpack)
@@ -655,22 +630,16 @@ toFloat msgpack =
 toInt : MsgPack -> Result Error Int
 toInt msgpack =
     case msgpack of
-        Integer { value } ->
-            Maybe.map Ok value
-                |> Maybe.withDefault (Err ValueNotSet)
+        Integer value ->
+            Ok value
 
-        Text { value } ->
-            value
-                |> Maybe.map
-                    (\v ->
-                        String.toInt v
-                            |> Result.mapError
-                                (\x ->
-                                    ("Conversion failure from Text to Int -" ++ x)
-                                        |> ConversionFailure
-                                )
+        Text value ->
+            String.toInt value
+                |> Result.mapError
+                    (\x ->
+                        ("Conversion failure from Text to Int -" ++ x)
+                            |> ConversionFailure
                     )
-                |> Maybe.withDefault (Err ValueNotSet)
 
         _ ->
             ("Expected MsgPack's Integer, received -" ++ Basics.toString msgpack)
@@ -688,65 +657,43 @@ toJson msgpack =
                 Empty ->
                     Json.Encode.null
 
-                Nil _ ->
+                Nil ->
                     Json.Encode.null
 
-                Blob { value } ->
-                    value
-                        |> Maybe.map (List.map Json.Encode.int >> Json.Encode.list)
-                        |> Maybe.withDefault (Json.Encode.list [])
+                Bin value ->
+                    (List.map Json.Encode.int >> Json.Encode.list) value
 
-                Boolean { value } ->
-                    value
-                        |> Maybe.map Json.Encode.bool
-                        |> Maybe.withDefault Json.Encode.null
+                Boolean value ->
+                    Json.Encode.bool value
 
-                Extension { value } ->
-                    value
-                        |> Maybe.map
-                            (\( t, bytes ) ->
-                                (t :: bytes)
-                                    |> List.map Json.Encode.int
-                                    |> Json.Encode.list
-                            )
-                        |> Maybe.withDefault (Json.Encode.list [])
+                Extension ( t, bytes ) ->
+                    (t :: bytes)
+                        |> List.map Json.Encode.int
+                        |> Json.Encode.list
 
-                Double { value } ->
-                    value
-                        |> Maybe.map Json.Encode.float
-                        |> Maybe.withDefault Json.Encode.null
+                Double value ->
+                    Json.Encode.float value
 
-                Integer { value } ->
-                    value
-                        |> Maybe.map Json.Encode.int
-                        |> Maybe.withDefault Json.Encode.null
+                Integer value ->
+                    Json.Encode.int value
 
-                Map { value } ->
-                    value
-                        |> Maybe.map
-                            (\d ->
-                                Dict.map (\_ v -> asJson v) d
-                                    |> Dict.toList
-                                    |> Json.Encode.object
-                            )
-                        |> Maybe.withDefault (Json.Encode.object [])
+                Map _ value ->
+                    Dict.map (\_ v -> asJson v) value
+                        |> Dict.toList
+                        |> Json.Encode.object
 
-                Text { value } ->
-                    value
-                        |> Maybe.map Json.Encode.string
-                        |> Maybe.withDefault Json.Encode.null
+                Text value ->
+                    Json.Encode.string value
 
-                Vector { value } ->
-                    value
-                        |> Maybe.map (List.map asJson >> Json.Encode.list)
-                        |> Maybe.withDefault (Json.Encode.list [])
+                Vector _ value ->
+                    (List.map asJson >> Json.Encode.list) value
     in
     case msgpack of
-        Map _ ->
+        Map _ _ ->
             asJson msgpack
                 |> Ok
 
-        Vector _ ->
+        Vector _ _ ->
             asJson msgpack
                 |> Ok
 
@@ -761,9 +708,8 @@ toJson msgpack =
 toList : MsgPack -> Result Error (List MsgPack)
 toList msgpack =
     case msgpack of
-        Vector { value } ->
-            Maybe.map Ok value
-                |> Maybe.withDefault (Err ValueNotSet)
+        Vector _ value ->
+            Ok value
 
         _ ->
             ("Expected MsgPack's Vector, received -" ++ Basics.toString msgpack)
@@ -776,9 +722,8 @@ toList msgpack =
 toString : MsgPack -> Result Error String
 toString msgpack =
     case msgpack of
-        Text { value } ->
-            Maybe.map Ok value
-                |> Maybe.withDefault (Err ValueNotSet)
+        Text value ->
+            Ok value
 
         _ ->
             ("Expected MsgPack's Text, received -" ++ Basics.toString msgpack)
@@ -795,7 +740,7 @@ parseMsgPack bytes fmt =
             (\r ->
                 case r.format of
                     Nil_ _ ->
-                        ( Nil { format = r.format, value = Nothing }
+                        ( Nil
                         , r.bytes
                         )
 
@@ -803,10 +748,7 @@ parseMsgPack bytes fmt =
                         parseArray r
 
                     Bin_ _ ->
-                        ( Blob
-                            { format = r.format
-                            , value = Just <| List.take r.dataSize r.bytes
-                            }
+                        ( Bin <| List.take r.dataSize r.bytes
                         , List.drop r.dataSize r.bytes
                         )
 
@@ -826,21 +768,14 @@ parseMsgPack bytes fmt =
                         parseMap r
 
                     FixNegInt_ _ ->
-                        ( Integer
-                            { format = r.format
-                            , value =
-                                Bitwise.and r.dataSize 0xFF
-                                    |> Bitwise.or 0x000FFFFFFFFFFF00
-                                    |> Just
-                            }
+                        ( Bitwise.and r.dataSize 0xFF
+                            |> Bitwise.or 0x000FFFFFFFFFFF00
+                            |> Integer
                         , r.bytes
                         )
 
                     FixPosInt_ _ ->
-                        ( Integer
-                            { format = r.format
-                            , value = Just r.dataSize
-                            }
+                        ( Integer r.dataSize
                         , r.bytes
                         )
 
@@ -873,26 +808,20 @@ Append a `MsgPack` item to `MsgPack` collection (array or map).
 append : MsgPack -> MsgPack -> Result Error MsgPack
 append item collection =
     case collection of
-        Map r ->
-            Map
-                { r
-                    | value =
-                        Maybe.map
-                            (\d ->
-                                case Dict.get appendKey d of
-                                    Nothing ->
-                                        Dict.insert appendKey item d
+        Map sz d ->
+            Map sz
+                (case Dict.get appendKey d of
+                    Nothing ->
+                        Dict.insert appendKey item d
 
-                                    Just kv ->
-                                        Dict.insert (asKey kv) item d
-                                            |> Dict.remove appendKey
-                            )
-                            r.value
-                }
+                    Just kv ->
+                        Dict.insert (asKey kv) item d
+                            |> Dict.remove appendKey
+                )
                 |> Ok
 
-        Vector r ->
-            Vector { r | value = r.value |> Maybe.map (\l -> l ++ [ item ]) }
+        Vector sz l ->
+            Vector sz (l ++ [ item ])
                 |> Ok
 
         _ ->
@@ -910,7 +839,7 @@ appendKey =
 
 
 {-| @private
-Convert `MsgPack`'s `MsgPackValue` type's `value` member value to `String`.
+Convert `MsgPack`'s `value` member to `String`.
 -}
 asKey : MsgPack -> String
 asKey msgpack =
@@ -918,59 +847,39 @@ asKey msgpack =
         Empty ->
             "__elm-msgpack-empty__"
 
-        Nil _ ->
+        Nil ->
             "__elm-msgpack-nil__"
 
-        Blob { value } ->
-            value
-                |> Maybe.map (\bytes -> Utf8.toString bytes |> Result.withDefault "__elm-msgpack-bin__")
-                |> Maybe.withDefault "__elm-msgpack-bin__"
+        Bin bytes ->
+            Utf8.toString bytes |> Result.withDefault "__elm-msgpack-bin__"
 
-        Boolean { value } ->
-            value
-                |> Maybe.map (\b -> "__elm-msgpack-bool-" ++ Basics.toString b ++ "__")
-                |> Maybe.withDefault "__elm-msgpack-bool__"
+        Boolean value ->
+            "__elm-msgpack-bool-" ++ Basics.toString value ++ "__"
 
-        Extension { value } ->
-            value
-                |> Maybe.map
-                    (\( _, b ) ->
-                        Utf8.toString b
-                            |> Result.withDefault "__elm-msgpack-ext__"
-                    )
-                |> Maybe.withDefault "__elm-msgpack-ext__"
+        Extension ( _, bytes ) ->
+            Utf8.toString bytes |> Result.withDefault "__elm-msgpack-ext__"
 
-        Double { value } ->
-            value
-                |> Maybe.map Basics.toString
-                |> Maybe.withDefault "__elm-msgpack-double__"
+        Double value ->
+            Basics.toString value
 
-        Integer { value } ->
-            value
-                |> Maybe.map Basics.toString
-                |> Maybe.withDefault "__elm-msgpack-integer__"
+        Integer value ->
+            Basics.toString value
 
-        Map { value } ->
-            value
-                |> Maybe.map Basics.toString
-                |> Maybe.withDefault "__elm-msgpack-map__"
+        Map _ value ->
+            Basics.toString value
 
-        Text { value } ->
+        Text value ->
             value
-                |> Maybe.map identity
-                |> Maybe.withDefault "__elm-msgpack-text__"
 
-        Vector { value } ->
-            value
-                |> Maybe.map Basics.toString
-                |> Maybe.withDefault "__elm-msgpack-vector__"
+        Vector _ value ->
+            Basics.toString value
 
 
 {-| @private
 -}
 parseArray : Parsed -> ( MsgPack, List Int )
 parseArray r =
-    ( Vector { format = r.format, value = Just [] }
+    ( Vector r.dataSize []
     , r.bytes
     )
 
@@ -979,7 +888,7 @@ parseArray r =
 -}
 parseBoolean : Parsed -> Bool -> ( MsgPack, List Int )
 parseBoolean r flag =
-    ( Boolean { format = r.format, value = Just flag }
+    ( Boolean flag
     , r.bytes
     )
 
@@ -989,16 +898,12 @@ parseBoolean r flag =
 parseExtension : Parsed -> ( MsgPack, List Int )
 parseExtension r =
     ( Extension
-        { format = r.format
-        , value =
-            Just
-                ( List.take 1 r.bytes
-                    |> List.head
-                    |> Maybe.withDefault 0
-                , List.drop 1 r.bytes
-                    |> List.take (r.dataSize - 1)
-                )
-        }
+        ( List.take 1 r.bytes
+            |> List.head
+            |> Maybe.withDefault 0
+        , List.drop 1 r.bytes
+            |> List.take (r.dataSize - 1)
+        )
     , List.drop r.dataSize r.bytes
     )
 
@@ -1063,10 +968,7 @@ parseFloat r =
                     ( 1, 1 )
                 |> (\( fs, _ ) -> fs)
     in
-    ( Double
-        { format = r.format
-        , value = Just <| sign * (fsum * (2 ^ exp))
-        }
+    ( Double <| sign * (fsum * (2 ^ exp))
     , List.drop r.dataSize r.bytes
     )
 
@@ -1092,11 +994,7 @@ parseInteger r =
                     ( 0, 0 )
                 |> (\( a, _ ) -> Bitwise.or a mask)
     in
-    ( Integer
-        { format = r.format
-        , value =
-            Just <| value
-        }
+    ( Integer value
     , List.drop r.dataSize r.bytes
     )
 
@@ -1105,7 +1003,7 @@ parseInteger r =
 -}
 parseMap : Parsed -> ( MsgPack, List Int )
 parseMap r =
-    ( Map { format = r.format, value = Just <| Dict.empty }
+    ( Map r.dataSize Dict.empty
     , r.bytes
     )
 
@@ -1114,14 +1012,10 @@ parseMap r =
 -}
 parseText : Parsed -> ( MsgPack, List Int )
 parseText r =
-    ( Text
-        { format = r.format
-        , value =
-            List.take r.dataSize r.bytes
-                |> Utf8.toString
-                |> Result.withDefault ""
-                |> Just
-        }
+    ( List.take r.dataSize r.bytes
+        |> Utf8.toString
+        |> Result.withDefault ""
+        |> Text
     , List.drop r.dataSize r.bytes
     )
 
@@ -1130,7 +1024,7 @@ parseText r =
 -}
 parseUnsigned : Parsed -> ( MsgPack, List Int )
 parseUnsigned r =
-    ( Integer { format = r.format, value = Just <| byteValue <| List.take r.dataSize r.bytes }
+    ( Integer <| byteValue <| List.take r.dataSize r.bytes
     , List.drop r.dataSize r.bytes
     )
 
