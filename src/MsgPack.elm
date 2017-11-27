@@ -509,36 +509,39 @@ unpack bytes =
                                             ( mp, dataLength (dataLayout format) bytes ) :: accum
 
                                         _ ->
-                                            case accum of
-                                                [] ->
-                                                    accum
-
-                                                ( collection, itemCount ) :: rest ->
-                                                    let
-                                                        newCollection =
-                                                            append mp collection
-                                                    in
-                                                    case newCollection of
-                                                        Err _ ->
-                                                            ( collection, itemCount ) :: rest
-
-                                                        Ok nc ->
-                                                            if itemCount - 1 == 0 then
-                                                                case rest of
-                                                                    [] ->
-                                                                        ( nc, 0 ) :: []
-
-                                                                    ( ct, ic ) :: accums ->
-                                                                        case append nc ct of
-                                                                            Err _ ->
-                                                                                ( ct, ic ) :: accums
-
-                                                                            Ok c ->
-                                                                                ( c, ic - 1 ) :: accums
-                                                            else
-                                                                ( nc, itemCount - 1 ) :: rest
+                                            unpackItem mp accum
                             in
                             parse next nextAccum
+
+        unpackItem mp accum =
+            case accum of
+                [] ->
+                    accum
+
+                ( collection, itemCount ) :: rest ->
+                    let
+                        newCollection =
+                            append mp collection
+                    in
+                    case newCollection of
+                        Err _ ->
+                            ( collection, itemCount ) :: rest
+
+                        Ok nc ->
+                            if itemCount - 1 == 0 then
+                                case rest of
+                                    [] ->
+                                        ( nc, 0 ) :: []
+
+                                    ( ct, ic ) :: accums ->
+                                        case append nc ct of
+                                            Err _ ->
+                                                ( ct, ic ) :: accums
+
+                                            Ok c ->
+                                                ( c, ic - 1 ) :: accums
+                            else
+                                ( nc, itemCount - 1 ) :: rest
     in
     parse bytes []
 
