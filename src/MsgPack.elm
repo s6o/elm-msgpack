@@ -51,7 +51,6 @@ module MsgPack
 
 -}
 
-import Array
 import Bitwise
 import Char
 import Dict exposing (Dict)
@@ -527,7 +526,7 @@ unpack bytes =
                                                             if itemCount - 1 == 0 then
                                                                 case rest of
                                                                     [] ->
-                                                                        rest
+                                                                        ( nc, 0 ) :: []
 
                                                                     ( ct, ic ) :: accums ->
                                                                         case append nc ct of
@@ -766,10 +765,7 @@ parseMsgPack bytes fmt =
                         parseText r
 
                     Float_ _ ->
-                        if r.dataSize == 4 then
-                            parseFloat32 r
-                        else
-                            parseFloat64 r
+                        parseFloat r
 
                     Map_ _ ->
                         parseMap r
@@ -926,91 +922,63 @@ parseExtension r =
 
 {-| @private
 -}
-parseFloat32 : Parsed -> ( MsgPack, List Int )
-parseFloat32 r =
+parseFloat : Parsed -> ( MsgPack, List Int )
+parseFloat r =
     let
-        rawBits =
-            List.take r.dataSize r.bytes
-                |> byteValue
+        bits =
+            r.bytes
+                |> List.foldl
+                    (\byte str ->
+                        str
+                            ++ Basics.toString (Bitwise.and byte 0x80 |> Bitwise.shiftRightZfBy 7)
+                            ++ Basics.toString (Bitwise.and byte 0x40 |> Bitwise.shiftRightZfBy 6)
+                            ++ Basics.toString (Bitwise.and byte 0x20 |> Bitwise.shiftRightZfBy 5)
+                            ++ Basics.toString (Bitwise.and byte 0x10 |> Bitwise.shiftRightZfBy 4)
+                            ++ Basics.toString (Bitwise.and byte 0x08 |> Bitwise.shiftRightZfBy 3)
+                            ++ Basics.toString (Bitwise.and byte 0x04 |> Bitwise.shiftRightZfBy 2)
+                            ++ Basics.toString (Bitwise.and byte 0x02 |> Bitwise.shiftRightZfBy 1)
+                            ++ Basics.toString (Bitwise.and byte 0x01)
+                    )
+                    ""
 
         sign =
-            Bitwise.shiftLeftBy 31 1
-                |> Bitwise.and rawBits
+            String.slice 0 1 bits
+                |> String.toInt
+                |> Result.withDefault 0
                 |> (\b -> -1 ^ b)
                 |> Basics.toFloat
 
-        exp =
-            (Bitwise.shiftRightZfBy 23 rawBits |> Bitwise.and 0xFF)
-                - 127
-                |> Basics.toFloat
-
-        frac =
-            Bitwise.and rawBits 0x007FFFFF
-
-        fsum =
-            Array.initialize 23 (\n -> 22 - n)
-                |> Array.toList
-                |> List.foldl
-                    (\i fs ->
-                        let
-                            bit =
-                                Bitwise.shiftLeftBy i 1
-                                    |> Bitwise.and frac
-                        in
-                        if bit == 1 then
-                            fs + Basics.toFloat (2 ^ (-1 * i))
-                        else
-                            fs
-                    )
-                    1.0
-    in
-    ( Double
-        { format = r.format
-        , value = Just <| sign * (fsum * (2 ^ exp))
-        }
-    , List.drop r.dataSize r.bytes
-    )
-
-
-{-| @private
--}
-parseFloat64 : Parsed -> ( MsgPack, List Int )
-parseFloat64 r =
-    let
-        rawBits =
-            List.take r.dataSize r.bytes
-                |> byteValue
-
-        sign =
-            Bitwise.shiftLeftBy 63 1
-                |> Bitwise.and rawBits
-                |> (\b -> -1 ^ b)
-                |> Basics.toFloat
+        ( expIdxA, expIdxB, bias ) =
+            if r.dataSize == 4 then
+                ( 1, 9, -127.0 )
+            else
+                ( 1, 12, -1023.0 )
 
         exp =
-            (Bitwise.shiftRightZfBy 51 rawBits |> Bitwise.and 0x07FF)
-                - 1023
-                |> Basics.toFloat
-
-        frac =
-            Bitwise.and rawBits 0x000FFFFFFFFFFFFF
+            String.slice expIdxA expIdxB bits
+                |> String.foldr
+                    (\b ( a, i ) ->
+                        ( if b == '1' then
+                            a + (2 ^ i)
+                          else
+                            0
+                        , i + 1
+                        )
+                    )
+                    ( 0, 0 )
+                |> (\( num, _ ) -> bias + num)
 
         fsum =
-            Array.initialize 52 (\n -> 51 - n)
-                |> Array.toList
-                |> List.foldl
-                    (\i fs ->
-                        let
-                            bit =
-                                Bitwise.shiftLeftBy i 1
-                                    |> Bitwise.and frac
-                        in
-                        if bit == 1 then
-                            fs + Basics.toFloat (2 ^ (-1 * i))
+            String.dropLeft expIdxB bits
+                |> String.foldl
+                    (\b ( fs, i ) ->
+                        if b == '1' then
+                            ( fs + (2.0 ^ (-1.0 * i)), i + 1 )
                         else
-                            fs
+                            ( fs, i + 1 )
                     )
-                    1.0
+                    ( 1, 1 )
+                |> (\( fs, _ ) -> fs)
     in
     ( Double
         { format = r.format
