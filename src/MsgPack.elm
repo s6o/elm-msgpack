@@ -168,11 +168,11 @@ toFormat byte =
 
         0xC5 ->
             -- bin16
-            Just <| Bin_ <| Blocks 1 <| Flag byte
+            Just <| Bin_ <| Blocks 2 <| Flag byte
 
         0xC6 ->
             -- bin32
-            Just <| Bin_ <| Blocks 1 <| Flag byte
+            Just <| Bin_ <| Blocks 4 <| Flag byte
 
         0xC7 ->
             -- ext8
