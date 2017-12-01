@@ -442,6 +442,203 @@ byteValue bytes =
         |> (\( a, _ ) -> a)
 
 
+{-| @private
+Given an float value split it into bytes in little-endian order.
+-}
+floatBytes : Float -> List Int
+floatBytes value =
+    let
+        fstr =
+            Debug.log "fstr" (Basics.toString value)
+
+        parts =
+            Debug.log "parts" (String.split "." fstr)
+
+        parseIntBits num accum =
+            case num of
+                0 ->
+                    accum
+
+                _ ->
+                    parseIntBits (num // 2) (rem num 2 :: accum)
+
+        intBits =
+            Debug.log "intBits"
+                (List.head parts
+                    |> Maybe.map
+                        (\s ->
+                            case String.toInt s of
+                                Err _ ->
+                                    ""
+
+                                Ok i ->
+                                    parseIntBits (i // 2) (rem i 2 :: [])
+                                        |> List.map Basics.toString
+                                        |> String.join ""
+                        )
+                    |> Maybe.withDefault ""
+                )
+
+        fracBits =
+            Debug.log "fracBits"
+                (List.drop 1 parts
+                    |> List.head
+                    |> Maybe.map
+                        (\s ->
+                            case String.toFloat ("0." ++ s) of
+                                Err _ ->
+                                    ""
+
+                                Ok f ->
+                                    let
+                                        parseFracBits fnum idx accum =
+                                            case idx > 52 || fnum >= 1 of
+                                                True ->
+                                                    accum
+
+                                                False ->
+                                                    parseFracBits
+                                                        (if (fnum * 2) > 1 then
+                                                            (fnum * 2) - (Basics.toFloat <| Basics.floor (fnum * 2))
+                                                         else
+                                                            fnum * 2
+                                                        )
+                                                        (idx + 1)
+                                                        (Basics.floor (fnum * 2) :: accum)
+                                    in
+                                    parseFracBits f 0 []
+                                        |> List.map Basics.toString
+                                        |> List.reverse
+                                        |> String.join ""
+                                        |> String.padRight 52 '0'
+                        )
+                    |> Maybe.withDefault ""
+                )
+
+        l1 =
+            Debug.log "fracBits count" (String.length fracBits)
+
+        ( exp, mantissa ) =
+            Debug.log "(exp, mantissa)"
+                (if String.startsWith "1" intBits then
+                    ( String.length intBits - 1
+                    , (String.dropLeft 1 intBits ++ fracBits)
+                        |> String.left 52
+                    )
+                 else
+                    fracBits
+                        |> (\bits ->
+                                let
+                                    scanToOne ch remaining pos =
+                                        case ch of
+                                            "1" ->
+                                                ( pos, remaining )
+
+                                            _ ->
+                                                scanToOne
+                                                    (String.left 1 remaining)
+                                                    (String.dropLeft 1 remaining)
+                                                    (pos + 1)
+                                in
+                                scanToOne (String.left 1 bits) (String.dropLeft 1 bits) 1
+                           )
+                        |> (\( pos, remaining ) -> ( -1 * pos, String.left 52 remaining |> String.padRight 52 '0' ))
+                )
+
+        expBits =
+            Debug.log "expBits"
+                ((exp + 1023)
+                    |> (\n -> parseIntBits (n // 2) (rem n 2 :: []))
+                    |> List.map Basics.toString
+                    |> String.join ""
+                    |> String.padLeft 11 '0'
+                )
+
+        signBit =
+            Debug.log "signBit"
+                (if value >= 0 then
+                    "0"
+                 else
+                    "1"
+                )
+
+        l2 =
+            Debug.log "Bits" (signBit ++ " " ++ expBits ++ " " ++ mantissa)
+    in
+    (signBit ++ expBits ++ mantissa)
+        |> (\bits ->
+                let
+                    nibbleMap =
+                        [ ( "0000", 0x00 )
+                        , ( "0001", 0x01 )
+                        , ( "0010", 0x02 )
+                        , ( "0011", 0x03 )
+                        , ( "0100", 0x04 )
+                        , ( "0101", 0x05 )
+                        , ( "0110", 0x06 )
+                        , ( "0111", 0x07 )
+                        , ( "1000", 0x08 )
+                        , ( "1001", 0x09 )
+                        , ( "1010", 0x0A )
+                        , ( "1011", 0x0B )
+                        , ( "1100", 0x0C )
+                        , ( "1101", 0x0D )
+                        , ( "1110", 0x0E )
+                        , ( "1111", 0x0F )
+                        ]
+                            |> Dict.fromList
+
+                    splitToNibbles nibble remaining accum =
+                        case nibble of
+                            "" ->
+                                accum
+
+                            _ ->
+                                Dict.get nibble nibbleMap
+                                    |> Maybe.map (\ni -> ni :: accum)
+                                    |> Maybe.withDefault accum
+                                    |> splitToNibbles (String.left 4 remaining) (String.dropLeft 4 remaining)
+                in
+                splitToNibbles (String.left 4 bits) (String.dropLeft 4 bits) []
+           )
+        |> List.foldr
+            (\n ( p, bytes ) ->
+                case p of
+                    Nothing ->
+                        ( Just n, bytes )
+
+                    Just hi ->
+                        ( Nothing
+                        , (Bitwise.shiftLeftBy 4 hi |> Bitwise.or n) :: bytes
+                        )
+            )
+            ( Nothing, [] )
+        |> (\( _, bytes ) -> bytes)
+
+
+{-| @private
+Given an int value split it into specified number of bytes in little-endian order.
+-}
+intBytes : Int -> Int -> List Int
+intBytes value byteCount =
+    if byteCount > 1 then
+        List.repeat byteCount 0xFF
+            |> List.foldl
+                (\mask ( a, i ) ->
+                    ( (Bitwise.shiftLeftBy i mask
+                        |> Bitwise.and value
+                        |> Bitwise.shiftRightZfBy i
+                      )
+                        :: a
+                    , i - 8
+                    )
+                )
+                ( [], (byteCount - 1) * 8 )
+            |> (\( a, _ ) -> a)
+    else
+        []
+
+
 
 -- MessagePack
 
