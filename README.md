@@ -2,7 +2,7 @@
 
 MessagePack for Elm (0.18).
 
-... work in progress...
+Alpha. All core funtionality + bugs
 
 The binary support in Elm (0.18) is currently weak. However, there is a work-a-round
 for receiving binary data directly over HTTP as string. The backend needs to send
