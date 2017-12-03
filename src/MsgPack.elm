@@ -1304,27 +1304,27 @@ encode msgpack =
                     if value >= 0 && value <= 127 then
                         value :: accum
                     else if value >= -31 && value < 0 then
-                        Bitwise.or 0x70 value :: accum
+                        Bitwise.and 0xFF value :: accum
                     else if value > 127 && value <= 255 then
                         value :: 0xCC :: accum
                     else if value > 255 && value <= 65535 then
-                        Bitwise.and 0xFF value :: Bitwise.and 0xFF00 value :: 0xCD :: accum
+                        Bitwise.and 0xFF value :: (Bitwise.shiftRightZfBy 8 value |> Bitwise.and 0xFF) :: 0xCD :: accum
                     else if value > 65535 && value <= 4294967295 then
                         Bitwise.and 0xFF value
-                            :: Bitwise.and 0xFF00 value
-                            :: Bitwise.and 0x00FF0000 value
-                            :: Bitwise.and 0xFF000000 value
+                            :: (Bitwise.shiftRightZfBy 8 value |> Bitwise.and 0xFF)
+                            :: (Bitwise.shiftRightZfBy 16 value |> Bitwise.and 0xFF)
+                            :: (Bitwise.shiftRightZfBy 24 value |> Bitwise.and 0xFF)
                             :: 0xCE
                             :: accum
                     else if value >= -127 && value < -31 then
-                        value :: 0xD0 :: accum
+                        Bitwise.and 0xFF value :: 0xD0 :: accum
                     else if value >= -32767 && value < -127 then
-                        Bitwise.and 0xFF value :: Bitwise.and 0xFF00 value :: 0xD1 :: accum
+                        Bitwise.and 0xFF value :: (Bitwise.shiftRightZfBy 8 value |> Bitwise.and 0xFF) :: 0xD1 :: accum
                     else if value >= -2147483647 && value < -32767 then
                         Bitwise.and 0xFF value
-                            :: Bitwise.and 0xFF00 value
-                            :: Bitwise.and 0x00FF0000 value
-                            :: Bitwise.and 0xFF000000 value
+                            :: (Bitwise.shiftRightZfBy 8 value |> Bitwise.and 0xFF)
+                            :: (Bitwise.shiftRightZfBy 16 value |> Bitwise.and 0xFF)
+                            :: (Bitwise.shiftRightZfBy 24 value |> Bitwise.and 0xFF)
                             :: 0xD2
                             :: accum
                     else
@@ -1341,18 +1341,18 @@ encode msgpack =
                                     accum
 
                                 ( k, i ) :: rest ->
-                                    encodeItems rest (encode i ++ encodeText k accum ++ accum)
+                                    encodeItems rest (encoder i accum ++ encodeText k accum)
                     in
                     if sz > 0 && sz <= 15 then
-                        itemBytes ++ (Bitwise.and 0x8F sz :: accum)
+                        itemBytes ++ (Bitwise.or 0x80 sz :: accum)
                     else if sz <= (2 ^ 16) - 1 then
-                        itemBytes ++ (Bitwise.and 0xFF sz :: Bitwise.and 0xFF00 sz :: 0xDE :: accum)
+                        itemBytes ++ (Bitwise.and 0xFF sz :: (Bitwise.shiftRightZfBy 8 sz |> Bitwise.and 0xFF) :: 0xDE :: accum)
                     else if sz <= (2 ^ 32) - 1 then
                         itemBytes
                             ++ Bitwise.and 0xFF sz
-                            :: Bitwise.and 0xFF00 sz
-                            :: Bitwise.and 0x00FF0000 sz
-                            :: Bitwise.and 0xFF000000 sz
+                            :: (Bitwise.shiftRightZfBy 8 sz |> Bitwise.and 0xFF)
+                            :: (Bitwise.shiftRightZfBy 16 sz |> Bitwise.and 0xFF)
+                            :: (Bitwise.shiftRightZfBy 24 sz |> Bitwise.and 0xFF)
                             :: 0xDF
                             :: accum
                     else
@@ -1372,18 +1372,18 @@ encode msgpack =
                                     accum
 
                                 i :: rest ->
-                                    encodeItems rest (encode i ++ accum)
+                                    encodeItems rest (encoder i accum)
                     in
                     if sz > 0 && sz <= 15 then
-                        itemBytes ++ (Bitwise.and 0x9F sz :: accum)
+                        itemBytes ++ (Bitwise.or 0x90 sz :: accum)
                     else if sz <= (2 ^ 16) - 1 then
-                        itemBytes ++ (Bitwise.and 0xFF sz :: Bitwise.and 0xFF00 sz :: 0xDC :: accum)
+                        itemBytes ++ (Bitwise.and 0xFF sz :: (Bitwise.shiftRightZfBy 8 sz |> Bitwise.and 0xFF) :: 0xDC :: accum)
                     else if sz <= (2 ^ 32) - 1 then
                         itemBytes
                             ++ Bitwise.and 0xFF sz
-                            :: Bitwise.and 0xFF00 sz
-                            :: Bitwise.and 0x00FF0000 sz
-                            :: Bitwise.and 0xFF000000 sz
+                            :: (Bitwise.shiftRightZfBy 8 sz |> Bitwise.and 0xFF)
+                            :: (Bitwise.shiftRightZfBy 16 sz |> Bitwise.and 0xFF)
+                            :: (Bitwise.shiftRightZfBy 24 sz |> Bitwise.and 0xFF)
                             :: 0xDD
                             :: accum
                     else
@@ -1398,17 +1398,17 @@ encode msgpack =
                     List.length bytes
             in
             if blen >= 1 && blen <= 31 then
-                List.reverse bytes ++ (Bitwise.or 0xBF blen :: accum)
+                List.reverse bytes ++ (Bitwise.or 0xA0 blen :: accum)
             else if blen <= (2 ^ 8) - 1 then
                 List.reverse bytes ++ (blen :: 0xD9 :: accum)
             else if blen <= (2 ^ 16) - 1 then
-                List.reverse bytes ++ (Bitwise.and 0xFF blen :: Bitwise.and 0xFF00 blen :: 0xDA :: accum)
+                List.reverse bytes ++ (Bitwise.and 0xFF blen :: (Bitwise.shiftRightZfBy 8 blen |> Bitwise.and 0xFF) :: 0xDA :: accum)
             else if blen <= (2 ^ 32) - 1 then
                 List.reverse bytes
                     ++ (Bitwise.and 0xFF blen
-                            :: Bitwise.and 0xFF00 blen
-                            :: Bitwise.and 0x00FF0000 blen
-                            :: Bitwise.and 0xFF000000 blen
+                            :: (Bitwise.shiftRightZfBy 8 blen |> Bitwise.and 0xFF)
+                            :: (Bitwise.shiftRightZfBy 16 blen |> Bitwise.and 0xFF)
+                            :: (Bitwise.shiftRightZfBy 24 blen |> Bitwise.and 0xFF)
                             :: 0xDB
                             :: accum
                        )
