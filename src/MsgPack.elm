@@ -449,10 +449,10 @@ floatBytes : Float -> List Int
 floatBytes value =
     let
         fstr =
-            Debug.log "fstr" (Basics.toString value)
+            Basics.toString value
 
         parts =
-            Debug.log "parts" (String.split "." fstr)
+            String.split "." fstr
 
         parseIntBits num accum =
             case num of
@@ -463,107 +463,91 @@ floatBytes value =
                     parseIntBits (num // 2) (rem num 2 :: accum)
 
         intBits =
-            Debug.log "intBits"
-                (List.head parts
-                    |> Maybe.map
-                        (\s ->
-                            case String.toInt s of
-                                Err _ ->
-                                    ""
+            List.head parts
+                |> Maybe.map
+                    (\s ->
+                        case String.toInt s of
+                            Err _ ->
+                                ""
 
-                                Ok i ->
-                                    parseIntBits (i // 2) (rem i 2 :: [])
-                                        |> List.map Basics.toString
-                                        |> String.join ""
-                        )
-                    |> Maybe.withDefault ""
-                )
+                            Ok i ->
+                                parseIntBits (i // 2) (rem i 2 :: [])
+                                    |> List.map Basics.toString
+                                    |> String.join ""
+                    )
+                |> Maybe.withDefault ""
 
         fracBits =
-            Debug.log "fracBits"
-                (List.drop 1 parts
-                    |> List.head
-                    |> Maybe.map
-                        (\s ->
-                            case String.toFloat ("0." ++ s) of
-                                Err _ ->
-                                    ""
+            List.drop 1 parts
+                |> List.head
+                |> Maybe.map
+                    (\s ->
+                        case String.toFloat ("0." ++ s) of
+                            Err _ ->
+                                ""
 
-                                Ok f ->
-                                    let
-                                        parseFracBits fnum idx accum =
-                                            case idx > 52 || fnum >= 1 of
-                                                True ->
-                                                    accum
+                            Ok f ->
+                                let
+                                    parseFracBits fnum idx accum =
+                                        case idx > 52 || fnum >= 1 of
+                                            True ->
+                                                accum
 
-                                                False ->
-                                                    parseFracBits
-                                                        (if (fnum * 2) > 1 then
-                                                            (fnum * 2) - (Basics.toFloat <| Basics.floor (fnum * 2))
-                                                         else
-                                                            fnum * 2
-                                                        )
-                                                        (idx + 1)
-                                                        (Basics.floor (fnum * 2) :: accum)
-                                    in
-                                    parseFracBits f 0 []
-                                        |> List.map Basics.toString
-                                        |> List.reverse
-                                        |> String.join ""
-                                        |> String.padRight 52 '0'
-                        )
-                    |> Maybe.withDefault ""
-                )
-
-        l1 =
-            Debug.log "fracBits count" (String.length fracBits)
+                                            False ->
+                                                parseFracBits
+                                                    (if (fnum * 2) > 1 then
+                                                        (fnum * 2) - (Basics.toFloat <| Basics.floor (fnum * 2))
+                                                     else
+                                                        fnum * 2
+                                                    )
+                                                    (idx + 1)
+                                                    (Basics.floor (fnum * 2) :: accum)
+                                in
+                                parseFracBits f 0 []
+                                    |> List.map Basics.toString
+                                    |> List.reverse
+                                    |> String.join ""
+                                    |> String.padRight 52 '0'
+                    )
+                |> Maybe.withDefault ""
 
         ( exp, mantissa ) =
-            Debug.log "(exp, mantissa)"
-                (if String.startsWith "1" intBits then
-                    ( String.length intBits - 1
-                    , (String.dropLeft 1 intBits ++ fracBits)
-                        |> String.left 52
-                    )
-                 else
-                    fracBits
-                        |> (\bits ->
-                                let
-                                    scanToOne ch remaining pos =
-                                        case ch of
-                                            "1" ->
-                                                ( pos, remaining )
-
-                                            _ ->
-                                                scanToOne
-                                                    (String.left 1 remaining)
-                                                    (String.dropLeft 1 remaining)
-                                                    (pos + 1)
-                                in
-                                scanToOne (String.left 1 bits) (String.dropLeft 1 bits) 1
-                           )
-                        |> (\( pos, remaining ) -> ( -1 * pos, String.left 52 remaining |> String.padRight 52 '0' ))
+            if String.startsWith "1" intBits then
+                ( String.length intBits - 1
+                , (String.dropLeft 1 intBits ++ fracBits)
+                    |> String.left 52
                 )
+            else
+                fracBits
+                    |> (\bits ->
+                            let
+                                scanToOne ch remaining pos =
+                                    case ch of
+                                        "1" ->
+                                            ( pos, remaining )
+
+                                        _ ->
+                                            scanToOne
+                                                (String.left 1 remaining)
+                                                (String.dropLeft 1 remaining)
+                                                (pos + 1)
+                            in
+                            scanToOne (String.left 1 bits) (String.dropLeft 1 bits) 1
+                       )
+                    |> (\( pos, remaining ) -> ( -1 * pos, String.left 52 remaining |> String.padRight 52 '0' ))
 
         expBits =
-            Debug.log "expBits"
-                ((exp + 1023)
-                    |> (\n -> parseIntBits (n // 2) (rem n 2 :: []))
-                    |> List.map Basics.toString
-                    |> String.join ""
-                    |> String.padLeft 11 '0'
-                )
+            (exp + 1023)
+                |> (\n -> parseIntBits (n // 2) (rem n 2 :: []))
+                |> List.map Basics.toString
+                |> String.join ""
+                |> String.padLeft 11 '0'
 
         signBit =
-            Debug.log "signBit"
-                (if value >= 0 then
-                    "0"
-                 else
-                    "1"
-                )
-
-        l2 =
-            Debug.log "Bits" (signBit ++ " " ++ expBits ++ " " ++ mantissa)
+            if value >= 0 then
+                "0"
+            else
+                "1"
     in
     (signBit ++ expBits ++ mantissa)
         |> (\bits ->
@@ -1258,7 +1242,181 @@ parseUnsigned r =
 -}
 encode : MsgPack -> List Int
 encode msgpack =
-    []
+    let
+        encoder mp accum =
+            case mp of
+                Empty ->
+                    accum
+
+                Nil ->
+                    0xC0 :: accum
+
+                Bin bytes ->
+                    let
+                        binlen =
+                            List.length bytes
+                    in
+                    if binlen <= (2 ^ 8) - 1 then
+                        List.reverse bytes ++ intBytes binlen 1 ++ (0xC4 :: accum)
+                    else if binlen <= (2 ^ 16) - 1 then
+                        List.reverse bytes ++ intBytes binlen 2 ++ (0xC5 :: accum)
+                    else if binlen <= (2 ^ 32) - 1 then
+                        List.reverse bytes ++ intBytes binlen 4 ++ (0xC6 :: accum)
+                    else
+                        Debug.log "Too many bytes for Bin, skipping" accum
+
+                Boolean flag ->
+                    (if flag == True then
+                        0xC3
+                     else
+                        0xC2
+                    )
+                        :: accum
+
+                Extension ( t, bytes ) ->
+                    let
+                        extlen =
+                            List.length bytes
+                    in
+                    if extlen == 1 then
+                        bytes ++ (t :: 0xD4 :: accum)
+                    else if extlen == 2 then
+                        List.reverse bytes ++ (t :: 0xD5 :: accum)
+                    else if extlen == 4 then
+                        List.reverse bytes ++ (t :: 0xD6 :: accum)
+                    else if extlen == 8 then
+                        List.reverse bytes ++ (t :: 0xD7 :: accum)
+                    else if extlen == 16 then
+                        List.reverse bytes ++ (t :: 0xD8 :: accum)
+                    else if extlen <= (2 ^ 8) - 1 then
+                        List.reverse bytes ++ intBytes extlen 1 ++ (t :: 0xC7 :: accum)
+                    else if extlen <= (2 ^ 16) - 1 then
+                        List.reverse bytes ++ intBytes extlen 2 ++ (t :: 0xC8 :: accum)
+                    else if extlen <= (2 ^ 32) - 1 then
+                        List.reverse bytes ++ intBytes extlen 4 ++ (t :: 0xC9 :: accum)
+                    else
+                        Debug.log "Too many bytes for Ext, skipping" accum
+
+                Double value ->
+                    floatBytes value ++ (0xCB :: accum)
+
+                Integer value ->
+                    if value >= 0 && value <= 127 then
+                        value :: accum
+                    else if value >= -31 && value < 0 then
+                        Bitwise.or 0x70 value :: accum
+                    else if value > 127 && value <= 255 then
+                        value :: 0xCC :: accum
+                    else if value > 255 && value <= 65535 then
+                        Bitwise.and 0xFF value :: Bitwise.and 0xFF00 value :: 0xCD :: accum
+                    else if value > 65535 && value <= 4294967295 then
+                        Bitwise.and 0xFF value
+                            :: Bitwise.and 0xFF00 value
+                            :: Bitwise.and 0x00FF0000 value
+                            :: Bitwise.and 0xFF000000 value
+                            :: 0xCE
+                            :: accum
+                    else if value >= -127 && value < -31 then
+                        value :: 0xD0 :: accum
+                    else if value >= -32767 && value < -127 then
+                        Bitwise.and 0xFF value :: Bitwise.and 0xFF00 value :: 0xD1 :: accum
+                    else if value >= -2147483647 && value < -32767 then
+                        Bitwise.and 0xFF value
+                            :: Bitwise.and 0xFF00 value
+                            :: Bitwise.and 0x00FF0000 value
+                            :: Bitwise.and 0xFF000000 value
+                            :: 0xD2
+                            :: accum
+                    else
+                        Debug.log "Too big integer values, skipping" accum
+
+                Map sz items ->
+                    let
+                        itemBytes =
+                            encodeItems (Dict.toList items) []
+
+                        encodeItems itemList accum =
+                            case itemList of
+                                [] ->
+                                    accum
+
+                                ( k, i ) :: rest ->
+                                    encodeItems rest (encode i ++ encodeText k accum ++ accum)
+                    in
+                    if sz > 0 && sz <= 15 then
+                        itemBytes ++ (Bitwise.and 0x8F sz :: accum)
+                    else if sz <= (2 ^ 16) - 1 then
+                        itemBytes ++ (Bitwise.and 0xFF sz :: Bitwise.and 0xFF00 sz :: 0xDE :: accum)
+                    else if sz <= (2 ^ 32) - 1 then
+                        itemBytes
+                            ++ Bitwise.and 0xFF sz
+                            :: Bitwise.and 0xFF00 sz
+                            :: Bitwise.and 0x00FF0000 sz
+                            :: Bitwise.and 0xFF000000 sz
+                            :: 0xDF
+                            :: accum
+                    else
+                        accum
+
+                Text value ->
+                    encodeText value accum
+
+                Vector sz items ->
+                    let
+                        itemBytes =
+                            encodeItems items []
+
+                        encodeItems itemList accum =
+                            case itemList of
+                                [] ->
+                                    accum
+
+                                i :: rest ->
+                                    encodeItems rest (encode i ++ accum)
+                    in
+                    if sz > 0 && sz <= 15 then
+                        itemBytes ++ (Bitwise.and 0x9F sz :: accum)
+                    else if sz <= (2 ^ 16) - 1 then
+                        itemBytes ++ (Bitwise.and 0xFF sz :: Bitwise.and 0xFF00 sz :: 0xDC :: accum)
+                    else if sz <= (2 ^ 32) - 1 then
+                        itemBytes
+                            ++ Bitwise.and 0xFF sz
+                            :: Bitwise.and 0xFF00 sz
+                            :: Bitwise.and 0x00FF0000 sz
+                            :: Bitwise.and 0xFF000000 sz
+                            :: 0xDD
+                            :: accum
+                    else
+                        accum
+
+        encodeText txt accum =
+            let
+                bytes =
+                    Utf8.toBytes txt
+
+                blen =
+                    List.length bytes
+            in
+            if blen >= 1 && blen <= 31 then
+                List.reverse bytes ++ (Bitwise.or 0xBF blen :: accum)
+            else if blen <= (2 ^ 8) - 1 then
+                List.reverse bytes ++ (blen :: 0xD9 :: accum)
+            else if blen <= (2 ^ 16) - 1 then
+                List.reverse bytes ++ (Bitwise.and 0xFF blen :: Bitwise.and 0xFF00 blen :: 0xDA :: accum)
+            else if blen <= (2 ^ 32) - 1 then
+                List.reverse bytes
+                    ++ (Bitwise.and 0xFF blen
+                            :: Bitwise.and 0xFF00 blen
+                            :: Bitwise.and 0x00FF0000 blen
+                            :: Bitwise.and 0xFF000000 blen
+                            :: 0xDB
+                            :: accum
+                       )
+            else
+                Debug.log "String too long, skipping" accum
+    in
+    encoder msgpack []
+        |> List.reverse
 
 
 {-| -}
