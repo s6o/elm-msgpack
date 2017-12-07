@@ -7,17 +7,17 @@ import Hex
 import Http
 import HttpBuilder exposing (..)
 import Json.Encode
-import Meld exposing (Meld)
+import Meld exposing (Error, Meld)
 import Messages exposing (Msg)
 import Model exposing (Model)
-import MsgPack as MP
+import MsgPack
 import Task exposing (Task)
 
 
 {-| @private
 Configure HTTP GET request to test retrieving MessgePack's base types.
 -}
-requestMsgpackBaseTypes : Model -> Task Http.Error String
+requestMsgpackBaseTypes : Model -> Task Error String
 requestMsgpackBaseTypes model =
     model.apiBase
         ++ "/msgpack-base-types"
@@ -25,28 +25,28 @@ requestMsgpackBaseTypes model =
         |> withExpect Http.expectString
         |> withCacheBuster "_"
         |> HttpBuilder.toTask
+        |> Task.mapError Meld.EHttp
 
 
-msgpackBaseTypes : Meld Model Http.Error Msg -> Task Http.Error (Meld Model Http.Error Msg)
+{-| Process HTTP GET request response of MessagePack base types.
+-}
+msgpackBaseTypes : Meld Model Error Msg -> Task Error (Meld Model Error Msg)
 msgpackBaseTypes meld =
     requestMsgpackBaseTypes (Meld.model meld)
         |> Task.map
             (\binstr ->
                 let
                     bytes =
-                        MP.asBytes binstr
+                        MsgPack.asBytes binstr
 
                     msgpack =
-                        MP.decode bytes
+                        MsgPack.decode bytes
 
-                    l1 =
-                        Debug.log "Deocded ints"
-                            (bytes
-                                |> List.map Hex.toString
-                            )
+                    model =
+                        Meld.model meld
 
-                    l2 =
-                        Debug.log "MsgPack Result" msgpack
+                    taskModel ma =
+                        { ma | baseTypes = msgpack }
 
                     value =
                         case msgpack of
@@ -54,10 +54,19 @@ msgpackBaseTypes meld =
                                 Json.Encode.null
 
                             Ok mp ->
-                                MP.toJson mp |> Result.withDefault Json.Encode.null
+                                MsgPack.toJson mp |> Result.withDefault Json.Encode.null
+
+                    l1 =
+                        Debug.log "Decoded ints"
+                            (bytes
+                                |> List.map Hex.toString
+                            )
+
+                    l2 =
+                        Debug.log "MsgPack Result" msgpack
 
                     l3 =
                         Debug.log "toJson" (Json.Encode.encode 0 value)
                 in
-                meld
+                Meld.withMerge taskModel meld
             )

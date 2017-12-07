@@ -5,27 +5,55 @@ module Update
         , update
         )
 
-import Api
-import Meld
+import Meld exposing (Error)
 import Messages exposing (Msg(..))
 import Model exposing (Model)
+import MsgPack
 
 
 init : ( Model, Cmd Msg )
 init =
-    let
-        m =
-            Model "/api/v0" 0
-    in
-    Meld.init m
-        |> Meld.withTasks [ Api.msgpackBaseTypes ]
-        |> Meld.send Requests (\_ -> m.loading) (\tc -> { m | loading = tc })
+    ( { apiBase = "/api/v0"
+      , actions = 0
+      , loading = 0
+      , baseTypes = Ok MsgPack.empty
+      }
+    , Cmd.none
+    )
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
-        Requests taskCount result ->
+        Acts tasks ->
+            Meld.init model
+                |> Meld.addTasks tasks
+                |> Meld.send Results (\_ -> model.actions) (\ac -> { model | actions = ac })
+
+        ActSeqs tasks ->
+            Meld.init model
+                |> Meld.addTasks tasks
+                |> Meld.sequence Results (\_ -> model.actions) (\ac -> { model | actions = ac })
+
+        Requests tasks ->
+            Meld.init model
+                |> Meld.addTasks tasks
+                |> Meld.send Responses (\_ -> model.loading) (\tc -> { model | loading = tc })
+
+        Results actCount result ->
+            case result of
+                Ok meld ->
+                    Meld.update
+                        actCount
+                        (\_ -> model.actions)
+                        (\ac -> { model | actions = ac })
+                        model
+                        meld
+
+                Err me ->
+                    meldError model me
+
+        Responses taskCount result ->
             case result of
                 Ok meld ->
                     Meld.update
@@ -35,14 +63,19 @@ update msg model =
                         model
                         meld
 
-                Err httpError ->
-                    let
-                        _ =
-                            Debug.log "Http Error" httpError
-                    in
-                    ( model, Cmd.none )
+                Err me ->
+                    meldError model me
 
 
 subscriptions : Model -> Sub Msg
 subscriptions model =
     Sub.none
+
+
+meldError : Model -> Error -> ( Model, Cmd Msg )
+meldError model error =
+    let
+        _ =
+            Debug.log "Meld Error" meldError
+    in
+    ( model, Cmd.none )
