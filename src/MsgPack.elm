@@ -400,6 +400,7 @@ dataLength data bytes =
             List.drop 1 bytes
                 |> List.take c
                 |> byteValue
+                |> (\bv -> bv + 1)
 
         Bytes c _ ->
             c
