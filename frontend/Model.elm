@@ -13,6 +13,7 @@ type alias Model =
     { apiBase : String
     , actions : Int
     , loading : Int
+    , errors : Maybe String
     , baseTypes : Result MsgPack.Error MsgPack
     }
 

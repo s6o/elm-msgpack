@@ -5,6 +5,8 @@ module Meld
         , addTasks
         , cmds
         , cmdseq
+        , errorMessage
+        , httpError
         , init
         , model
         , send
@@ -40,7 +42,7 @@ Set up tasks with a tag (Msg) for Elm's runtime to be executed.
 
 # Task result processing
 
-@docs update
+@docs update, errorMessage, httpError
 
 -}
 
@@ -235,3 +237,41 @@ update taskCount modelCountFn storeCountFn appModel (Meld { merges, commands }) 
         |> List.map (\cmdFn -> cmdFn finalModel)
         |> Cmd.batch
     )
+
+
+{-| Retrive the error message.
+-}
+errorMessage : Error -> String
+errorMessage error =
+    case error of
+        EMsg msg ->
+            msg
+
+        EHttp httpError ->
+            case httpError of
+                Http.BadUrl msg ->
+                    msg
+
+                Http.Timeout ->
+                    "Request timeout."
+
+                Http.NetworkError ->
+                    "Network error."
+
+                Http.BadStatus { status } ->
+                    toString status.code ++ " | " ++ status.message
+
+                Http.BadPayload dbg { status } ->
+                    toString status.code ++ " | " ++ status.message ++ " | " ++ dbg
+
+
+{-| Helper to access Http.Error is ther is one
+-}
+httpError : Error -> Maybe Http.Error
+httpError error =
+    case error of
+        EHttp httpError ->
+            Just httpError
+
+        _ ->
+            Nothing

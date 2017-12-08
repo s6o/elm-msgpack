@@ -16,6 +16,7 @@ init =
     ( { apiBase = "/api/v0"
       , actions = 0
       , loading = 0
+      , errors = Nothing
       , baseTypes = Ok MsgPack.empty
       }
     , Cmd.none
@@ -51,7 +52,7 @@ update msg model =
                         meld
 
                 Err me ->
-                    meldError model me
+                    meldError { model | actions = model.actions - actCount } me
 
         Responses taskCount result ->
             case result of
@@ -64,7 +65,7 @@ update msg model =
                         meld
 
                 Err me ->
-                    meldError model me
+                    meldError { model | loading = model.loading - taskCount } me
 
 
 subscriptions : Model -> Sub Msg
@@ -76,6 +77,8 @@ meldError : Model -> Error -> ( Model, Cmd Msg )
 meldError model error =
     let
         _ =
-            Debug.log "Meld Error" meldError
+            Debug.log "Meld Error" error
     in
-    ( model, Cmd.none )
+    ( { model | errors = Meld.errorMessage error |> Just }
+    , Cmd.none
+    )
